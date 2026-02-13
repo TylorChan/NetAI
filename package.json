@@ -5,6 +5,11 @@
   "workspaces": [
     "apps/*"
   ],
+  "overrides": {
+    "next": "16.0.7",
+    "react": "19.2.1",
+    "react-dom": "19.2.1"
+  },
   "scripts": {
     "dev:web": "npm run dev --workspace @netai/web",
     "dev:api": "npm run dev --workspace @netai/api",
