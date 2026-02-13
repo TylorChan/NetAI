@@ -1,0 +1,166 @@
+:root {
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --text: #101828;
+  --muted: #475467;
+  --accent: #0f766e;
+  --danger: #b42318;
+  --border: #d0d5dd;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 20% 10%, #e6f4f1 0%, var(--bg) 45%);
+}
+
+.shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.page-grid,
+.session-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.page-grid {
+  grid-template-columns: 1fr;
+}
+
+.session-grid {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+}
+
+.hero h1 {
+  margin: 8px 0 12px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+input,
+textarea,
+button {
+  font: inherit;
+}
+
+input,
+textarea {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+button {
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.tag {
+  display: inline-block;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
+  margin: 0;
+}
+
+.transcript ul,
+.events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+
+.turn {
+  padding: 10px;
+  border-radius: 10px;
+  background: #f7faf9;
+}
+
+.turn.assistant {
+  background: #eef4ff;
+}
+
+.role {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.turn p {
+  margin: 6px 0;
+}
+
+pre {
+  white-space: pre-wrap;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.score {
+  font-size: 22px;
+  margin: 0 0 10px;
+}
+
+@media (max-width: 768px) {
+  .shell {
+    padding: 14px;
+  }
+
+  .button-row {
+    flex-direction: column;
+  }
+}

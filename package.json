@@ -1,0 +1,14 @@
+{
+  "name": "netai",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @netai/web",
+    "dev:api": "npm run dev --workspace @netai/api",
+    "dev:worker": "npm run dev --workspace @netai/worker",
+    "dev": "npm run dev:api & npm run dev:worker & npm run dev:web"
+  }
+}
