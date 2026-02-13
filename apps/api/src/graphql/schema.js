@@ -34,6 +34,7 @@ export const typeDefs = /* GraphQL */ `
     session: Session!
     recentTurns: [SessionTurn!]!
     contextSummary: String!
+    stageHint: String!
   }
 
   type FollowupEmailSuggestion {
@@ -45,6 +46,17 @@ export const typeDefs = /* GraphQL */ `
     session: Session!
     queued: Boolean!
     message: String!
+  }
+
+  type DeleteSessionPayload {
+    sessionId: ID!
+    deleted: Boolean!
+  }
+
+  type StageTransitionPayload {
+    session: Session!
+    applied: Boolean!
+    reason: String!
   }
 
   input StartNetworkingSessionInput {
@@ -64,6 +76,18 @@ export const typeDefs = /* GraphQL */ `
     sessionId: ID!
     tone: String
     length: String
+  }
+
+  input RenameSessionInput {
+    sessionId: ID!
+    goal: String!
+  }
+
+  input RequestStageTransitionInput {
+    sessionId: ID!
+    targetStage: String!
+    requestedBy: String
+    reason: String
   }
 
   type VocabularyEntry {
@@ -126,6 +150,9 @@ export const typeDefs = /* GraphQL */ `
 
   type Mutation {
     startNetworkingSession(input: StartNetworkingSessionInput!): Session!
+    renameSession(input: RenameSessionInput!): Session!
+    deleteSession(sessionId: ID!): DeleteSessionPayload!
+    requestStageTransition(input: RequestStageTransitionInput!): StageTransitionPayload!
     appendSessionTurn(input: AppendSessionTurnInput!): SessionTurn!
     finalizeNetworkingSession(sessionId: ID!): FinalizeNetworkingSessionPayload!
     generateFollowupEmail(input: GenerateFollowupEmailInput!): FollowupEmailSuggestion!

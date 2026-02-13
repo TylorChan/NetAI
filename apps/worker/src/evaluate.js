@@ -1,55 +1,132 @@
-async function openAiEvaluate({ session, turns, apiKey }) {
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: "gpt-5-mini-2025-08-07",
-      input: [
+import { z } from "zod";
+import { ChatOpenAI } from "@langchain/openai";
+import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
+
+const EvaluationSchema = z.object({
+  score: z.number().int().min(1).max(10),
+  strengths: z.array(z.string()).default([]),
+  improvements: z.array(z.string()).default([]),
+  nextActions: z.array(z.string()).default([]),
+  followUpEmail: z.string().default("")
+});
+
+const EvalState = Annotation.Root({
+  session: Annotation(),
+  turns: Annotation(),
+  transcript: Annotation(),
+  evaluation: Annotation()
+});
+
+function formatTurnsForPrompt(turns) {
+  return turns
+    .map((turn, index) => {
+      const role = (turn.role || "user").toUpperCase();
+      const content = String(turn.content || "").trim();
+      return `${index + 1}. [${role}] ${content}`;
+    })
+    .join("\n");
+}
+
+function buildPrompt({ session, transcript }) {
+  const goal = session?.goal || "Networking conversation practice";
+  const context = session?.customContext || session?.targetProfileContext || "General networking";
+  const stage = session?.stageState || "UNKNOWN";
+
+  return [
+    "You are a strict networking conversation evaluator.",
+    "Score the user from 1 to 10 using practical networking quality.",
+    "Feedback must be sharp, specific, and evidence-based.",
+    "Do not be polite or vague. Be direct and diagnostic.",
+    "Each bullet must be one sentence and under 22 words.",
+    "Reference concrete moments from transcript when possible.",
+    "",
+    `Goal: ${goal}`,
+    `Context: ${context}`,
+    `Final stage: ${stage}`,
+    "",
+    "Transcript:",
+    transcript
+  ].join("\n");
+}
+
+function clampBullets(items, fallback, maxItems = 4) {
+  const normalized = (items || [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, maxItems);
+
+  if (normalized.length) {
+    return normalized;
+  }
+
+  return [fallback];
+}
+
+function normalizeEvaluation(raw) {
+  const parsed = EvaluationSchema.parse(raw);
+  return {
+    ...parsed,
+    strengths: clampBullets(
+      parsed.strengths,
+      "You kept conversational momentum instead of answering in isolated one-liners."
+    ),
+    improvements: clampBullets(
+      parsed.improvements,
+      "Your questions lacked specificity, so responses stayed generic and low-signal."
+    ),
+    nextActions: clampBullets(
+      parsed.nextActions,
+      "Prepare two role-specific questions and one follow-up probe before starting."
+    ).slice(0, 3),
+    followUpEmail: String(parsed.followUpEmail || "").trim()
+  };
+}
+
+function createGraph({ apiKey, model }) {
+  const llm = new ChatOpenAI({
+    apiKey,
+    model
+  });
+
+  const structuredLlm = llm.withStructuredOutput(EvaluationSchema, {
+    name: "networking_session_evaluation",
+    strict: true
+  });
+
+  return new StateGraph(EvalState)
+    .addNode("prepareTranscript", async (state) => ({
+      transcript: formatTurnsForPrompt(state.turns || [])
+    }))
+    .addNode("evaluateSession", async (state) => {
+      const result = await structuredLlm.invoke([
         {
           role: "system",
           content:
-            "You are a strict networking coach. Return only JSON that matches the schema: score(1-10), strengths[], improvements[], nextActions[], followUpEmail(string)."
+            [
+              "Return only the requested structured fields.",
+              "For strengths: provide up to 4 bullets, each one sentence.",
+              "For improvements: provide up to 4 critical bullets that pinpoint mistakes.",
+              "For nextActions: provide exactly 3 high-impact actions for the next practice.",
+              "Focus on stage transitions, question quality, listening depth, and close quality."
+            ].join(" ")
         },
         {
           role: "user",
-          content: JSON.stringify({
-            session,
-            turns
+          content: buildPrompt({
+            session: state.session,
+            transcript: state.transcript
           })
         }
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "session_eval",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              score: { type: "integer", minimum: 1, maximum: 10 },
-              strengths: { type: "array", items: { type: "string" } },
-              improvements: { type: "array", items: { type: "string" } },
-              nextActions: { type: "array", items: { type: "string" } },
-              followUpEmail: { type: "string" }
-            },
-            required: ["score", "strengths", "improvements", "nextActions", "followUpEmail"],
-            additionalProperties: false
-          }
-        }
-      }
+      ]);
+
+      return {
+        evaluation: normalizeEvaluation(result)
+      };
     })
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenAI evaluate failed (${response.status}): ${text}`);
-  }
-
-  const data = await response.json();
-  return JSON.parse(data.output_text);
+    .addEdge(START, "prepareTranscript")
+    .addEdge("prepareTranscript", "evaluateSession")
+    .addEdge("evaluateSession", END)
+    .compile();
 }
 
 export async function evaluateConversation({ session, turns, apiKey }) {
@@ -57,5 +134,12 @@ export async function evaluateConversation({ session, turns, apiKey }) {
     throw new Error("OPENAI_API_KEY is required in worker");
   }
 
-  return openAiEvaluate({ session, turns, apiKey });
+  const model = process.env.EVALUATION_MODEL || "gpt-5.2";
+  const graph = createGraph({ apiKey, model });
+  const result = await graph.invoke({
+    session,
+    turns
+  });
+
+  return normalizeEvaluation(result.evaluation);
 }

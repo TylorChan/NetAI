@@ -8,14 +8,17 @@ NetAI is a web-first AI networking practice app with realtime voice coaching, se
 - `apps/api`: Node.js GraphQL API (Express + GraphQL Yoga)
 - `apps/worker`: Node.js evaluation worker (async scoring path)
 - `infra/cloudrun`: Dockerfiles for Cloud Run deployment
+- Data layer: PostgreSQL + Redis (required by API startup)
 
 ## Core Product Flow
 
-1. Create session with user goal + target profile context
-2. Connect realtime voice session via ephemeral token endpoint
-3. Persist turns at session level through GraphQL
-4. Finalize session and queue async evaluation
-5. Generate follow-up email draft
+1. (Optional) Paste LinkedIn URL to auto-generate target profile context
+2. Create session with user goal + context (default context auto-applies if blank)
+3. Connect realtime voice session via ephemeral token endpoint
+4. Persist transcript turns at session level through GraphQL
+5. Stage workflow auto-progresses (`SMALL_TALK -> EXPERIENCE -> ADVICE -> WRAP_UP`)
+6. Finalize session and queue async evaluation
+7. Generate follow-up email draft
 
 ## Quick Start
 
@@ -51,13 +54,18 @@ Open:
 
 Use `apps/api/.env.example` as template.
 
-Required for realtime token creation:
+Required:
 
 - `OPENAI_API_KEY`
 - `PORT` (default `4000`)
 - `OPENAI_REALTIME_MODEL` (default `gpt-realtime`)
-- `WORKER_URL` (default `http://localhost:4100`)
+- `WORKER_URL` (default `http://localhost:4100`, required)
 - `CORS_ORIGIN` (default `http://localhost:3000`)
+- `DATABASE_URL` (required)
+- `REDIS_URL` (required)
+- `GRAPHQL_MAX_DEPTH` (default `8`)
+- `GRAPHQL_RATE_LIMIT_WINDOW_MS` (default `60000`)
+- `GRAPHQL_RATE_LIMIT_MAX` (default `120`)
 
 ### Web (`apps/web/.env.local`)
 
@@ -82,12 +90,21 @@ NetAI domain:
 - `getSessionResume`
 - `getSessionEvaluation`
 - `generateFollowupEmail`
+- `extractLinkedInProfileContext`
 
 MARKII-compatible business chain (reused semantics):
 
 - `saveVocabulary`
 - `startReviewSession`
 - `saveReviewSession`
+
+## API Runtime Safeguards (implemented)
+
+- GraphQL query depth limiting
+- GraphQL route rate limiting
+- `helmet` security headers
+- Redis-backed cache for session/evaluation/review reads
+- DB schema bootstrap on startup (table/index creation)
 
 ## Deployment Targets
 

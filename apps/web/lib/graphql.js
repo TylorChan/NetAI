@@ -33,6 +33,36 @@ export const mutations = {
       }
     }
   `,
+  renameSession: `
+    mutation RenameSession($input: RenameSessionInput!) {
+      renameSession(input: $input) {
+        id
+        goal
+        updatedAt
+      }
+    }
+  `,
+  deleteSession: `
+    mutation DeleteSession($sessionId: ID!) {
+      deleteSession(sessionId: $sessionId) {
+        sessionId
+        deleted
+      }
+    }
+  `,
+  requestStageTransition: `
+    mutation RequestStageTransition($input: RequestStageTransitionInput!) {
+      requestStageTransition(input: $input) {
+        applied
+        reason
+        session {
+          id
+          stageState
+          updatedAt
+        }
+      }
+    }
+  `,
   appendSessionTurn: `
     mutation AppendSessionTurn($input: AppendSessionTurnInput!) {
       appendSessionTurn(input: $input) {
@@ -73,6 +103,7 @@ export const queries = {
     query GetSessionResume($sessionId: ID!) {
       getSessionResume(sessionId: $sessionId) {
         contextSummary
+        stageHint
         session {
           id
           userId
@@ -105,6 +136,17 @@ export const queries = {
         nextActions
         followUpEmail
         createdAt
+      }
+    }
+  `,
+  sessions: `
+    query Sessions($userId: String!) {
+      sessions(userId: $userId) {
+        id
+        goal
+        status
+        stageState
+        updatedAt
       }
     }
   `

@@ -8,6 +8,7 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "@openai/agents": "^0.1.11",
     "next": "16.0.7",
     "react": "19.2.1",
     "react-dom": "19.2.1"

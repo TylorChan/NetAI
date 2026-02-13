@@ -1,73 +1,162 @@
 import "dotenv/config";
 import cors from "cors";
 import express from "express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import { Pool } from "pg";
+import Redis from "ioredis";
 import { createYoga, createSchema } from "graphql-yoga";
+import depthLimit from "graphql-depth-limit";
 
 import { typeDefs } from "./graphql/schema.js";
 import { createResolvers } from "./graphql/resolvers.js";
+import { createLoaders } from "./graphql/loaders.js";
 import { createRealtimeSession } from "./services/realtimeSessionService.js";
 import { createEvaluationService } from "./services/evaluationService.js";
 import { createFollowupEmailService } from "./services/followupEmailService.js";
-import { MemoryStore } from "./store/memoryStore.js";
+import { PostgresStore } from "./store/postgresStore.js";
 import { createLogger } from "./utils/logger.js";
+import { readRuntimeConfig } from "./db/env.js";
+import { initializeDatabase } from "./db/initDb.js";
 
 const logger = createLogger("api");
-const app = express();
 
-const store = new MemoryStore();
-const evaluationService = createEvaluationService({
-  store,
-  workerUrl: process.env.WORKER_URL,
-  logger
-});
-const followupEmailService = createFollowupEmailService({ store });
+async function bootstrap() {
+  const config = readRuntimeConfig();
 
-const schema = createSchema({
-  typeDefs,
-  resolvers: createResolvers({
+  const pool = new Pool({
+    connectionString: config.databaseUrl,
+    max: 20,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+    application_name: "netai-api"
+  });
+
+  const redis = new Redis(config.redisUrl, {
+    maxRetriesPerRequest: 2,
+    connectTimeout: 10_000,
+    enableReadyCheck: true,
+    lazyConnect: false
+  });
+
+  await pool.query("SELECT 1");
+  await redis.ping();
+
+  await initializeDatabase({ pool, logger });
+
+  const store = new PostgresStore({ pool, redis, logger });
+  const evaluationService = createEvaluationService({
     store,
-    evaluationService,
-    followupEmailService,
+    workerUrl: config.workerUrl,
     logger
-  })
-});
+  });
+  const followupEmailService = createFollowupEmailService({
+    store,
+    openAiApiKey: config.openAiApiKey,
+    model: config.followupEmailModel
+  });
 
-const yoga = createYoga({
-  schema,
-  graphqlEndpoint: "/graphql"
-});
+  const schema = createSchema({
+    typeDefs,
+    resolvers: createResolvers({
+      store,
+      evaluationService,
+      followupEmailService,
+      logger
+    })
+  });
 
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:3000"
-  })
-);
-app.use("/v1", express.json({ limit: "1mb" }));
+  const yoga = createYoga({
+    schema,
+    graphqlEndpoint: "/graphql",
+    maskedErrors: true,
+    validationRules: [depthLimit(config.graphqlMaxDepth)],
+    context: async () => ({
+      loaders: createLoaders(store)
+    })
+  });
 
-app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "netai-api" });
-});
+  const app = express();
+  app.set("trust proxy", 1);
 
-app.post("/v1/realtime/sessions", async (req, res) => {
-  try {
-    const { model, voice } = req.body || {};
+  app.use(
+    cors({
+      origin: config.corsOrigin
+    })
+  );
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: false
+    })
+  );
 
-    const payload = await createRealtimeSession({
-      openAiApiKey: process.env.OPENAI_API_KEY,
-      model: model || process.env.OPENAI_REALTIME_MODEL || "gpt-realtime",
-      voice: voice || "alloy"
+  app.use("/v1", express.json({ limit: "1mb" }));
+
+  const graphqlLimiter = rateLimit({
+    windowMs: config.graphqlRateLimitWindowMs,
+    max: config.graphqlRateLimitMax,
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
+  app.get("/health", async (_req, res) => {
+    try {
+      await pool.query("SELECT 1");
+      await redis.ping();
+      res.json({ ok: true, service: "netai-api" });
+    } catch (error) {
+      res.status(503).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/v1/realtime/sessions", async (req, res) => {
+    try {
+      const { model, voice } = req.body || {};
+
+      const payload = await createRealtimeSession({
+        openAiApiKey: config.openAiApiKey,
+        model: model || config.openAiRealtimeModel,
+        voice: voice || "alloy"
+      });
+
+      res.json(payload);
+    } catch (error) {
+      const statusCode =
+        typeof error.status === "number" && error.status >= 400 && error.status < 600
+          ? error.status
+          : 500;
+
+      logger.error("failed to create realtime session", {
+        error: error.message,
+        details: error.details
+      });
+      res.status(statusCode).json({
+        error: error.message,
+        details: error.details || ""
+      });
+    }
+  });
+
+  app.use("/graphql", graphqlLimiter, yoga);
+
+  const server = app.listen(config.port, () => {
+    logger.info("api started", { port: config.port });
+  });
+
+  async function shutdown(signal) {
+    logger.info("api shutting down", { signal });
+    server.close(async () => {
+      await Promise.allSettled([pool.end(), redis.quit()]);
+      process.exit(0);
     });
-
-    res.json(payload);
-  } catch (error) {
-    logger.error("failed to create realtime session", { error: error.message });
-    res.status(500).json({ error: error.message });
   }
-});
 
-app.use("/graphql", yoga);
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+}
 
-const port = Number(process.env.PORT || 4000);
-app.listen(port, () => {
-  logger.info("api started", { port });
+bootstrap().catch((error) => {
+  logger.error("api bootstrap failed", { error: error.message, stack: error.stack });
+  process.exit(1);
 });

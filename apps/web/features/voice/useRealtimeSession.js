@@ -1,7 +1,70 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  RealtimeAgent,
+  RealtimeSession,
+  OpenAIRealtimeWebRTC,
+  tool
+} from "@openai/agents/realtime";
 import { API_BASE_URL, REALTIME_MODEL } from "@/lib/config";
+import { graphqlRequest, mutations } from "@/lib/graphql";
+
+const STAGE_PROMPTS = {
+  SMALL_TALK:
+    "Guide a short warm-up small talk. Use weather/day/occasion naturally and keep tone friendly.",
+  EXPERIENCE:
+    "Discuss work experience: role scope, projects, cross-team collaboration, and industry insight.",
+  ADVICE:
+    "Shift to career advice: recruiting process, interview prep, and high-impact skills to build.",
+  WRAP_UP:
+    "Close the conversation: recap one key takeaway and encourage a follow-up message.",
+  DONE: "Session is ending. Keep responses concise and transition toward closure."
+};
+
+const STAGE_ALIASES = {
+  SMALL_TALK: ["SMALL_TALK", "SMALL TALK", "SMALLTALK", "INTRO", "WARMUP"],
+  EXPERIENCE: ["EXPERIENCE", "PROJECT", "PROJECTS", "ROLE"],
+  ADVICE: ["ADVICE", "RECRUITING", "INTERVIEW", "CAREER"],
+  WRAP_UP: ["WRAP_UP", "WRAP UP", "WRAPUP", "CLOSE", "CLOSING"],
+  DONE: ["DONE", "END", "FINISH"]
+};
+const STAGE_ORDER = ["SMALL_TALK", "EXPERIENCE", "ADVICE", "WRAP_UP", "DONE"];
+
+function normalizeStage(stageState) {
+  if (!stageState || !STAGE_PROMPTS[stageState]) {
+    return "SMALL_TALK";
+  }
+  return stageState;
+}
+
+function normalizeRequestedStage(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) {
+    return "";
+  }
+
+  for (const [stage, aliases] of Object.entries(STAGE_ALIASES)) {
+    if (aliases.includes(normalized)) {
+      return stage;
+    }
+  }
+
+  return "";
+}
+
+function resolveTargetStage(value, currentStage) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "NEXT" || normalized === "NEXT_STAGE" || normalized === "NEXT STAGE") {
+    const idx = STAGE_ORDER.indexOf(normalizeStage(currentStage));
+    if (idx >= 0 && idx < STAGE_ORDER.length - 1) {
+      return STAGE_ORDER[idx + 1];
+    }
+    return normalizeStage(currentStage);
+  }
+
+  return normalizeRequestedStage(value);
+}
 
 function parseEphemeralToken(payload) {
   if (payload?.client_secret?.value) return payload.client_secret.value;
@@ -9,48 +72,206 @@ function parseEphemeralToken(payload) {
   return null;
 }
 
-export function useRealtimeSession() {
+function buildInstructions({ stageState, contextSummary }) {
+  const stage = normalizeStage(stageState);
+  const stageDirective = STAGE_PROMPTS[stage];
+  const context = contextSummary || "Default networking context.";
+
+  return [
+    "You are NetAI, a networking voice coach for realistic practice.",
+    `Current stage: ${stage}. ${stageDirective}`,
+    `Session context: ${context}`,
+    "Respond conversationally in spoken style and ask one focused question per turn.",
+    "Keep each response under 3 sentences and prioritize natural back-and-forth.",
+    "Stage transitions are backend-controlled.",
+    "Never switch stage yourself.",
+    "When user asks to move stage, call request_stage_transition tool first.",
+    "If tool returns denied, stay in current stage and continue current-stage questioning.",
+    "Never interrupt yourself; finish one answer before asking the next question."
+  ].join(" ");
+}
+
+function extractMessageText(content = []) {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .map((chunk) => {
+      if (!chunk || typeof chunk !== "object") {
+        return "";
+      }
+      if (chunk.type === "input_text" || chunk.type === "text" || chunk.type === "output_text") {
+        return chunk.text || "";
+      }
+      if (chunk.type === "audio") {
+        return chunk.transcript || "";
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function normalizeRole(role) {
+  return role === "assistant" || role === "system" ? role : "user";
+}
+
+function createNetworkingCoachAgent({ pushEvent, onStageTransition }) {
+  const requestStageTransitionTool = tool({
+    name: "request_stage_transition",
+    description:
+      "Request one-step stage transition. Must be called before moving from current stage to next stage.",
+    parameters: {
+      type: "object",
+      properties: {
+        targetStage: {
+          type: "string",
+          description: "Target stage name. One of SMALL_TALK, EXPERIENCE, ADVICE, WRAP_UP, DONE."
+        },
+        reason: {
+          type: "string",
+          description: "Short reason for requesting transition based on conversation progress."
+        }
+      },
+      required: ["targetStage"],
+      additionalProperties: false
+    },
+    execute: async (input, runContext) => {
+      try {
+        const contextSessionId = runContext?.context?.sessionId;
+        if (!contextSessionId) {
+          return "Transition denied: missing session ID.";
+        }
+
+        const targetStage = resolveTargetStage(input?.targetStage, runContext?.context?.stageState);
+        if (!targetStage) {
+          return "Transition denied: invalid target stage.";
+        }
+
+        const data = await graphqlRequest(mutations.requestStageTransition, {
+          input: {
+            sessionId: contextSessionId,
+            targetStage,
+            requestedBy: "realtime_agent",
+            reason: String(input?.reason || "")
+          }
+        });
+
+        const result = data.requestStageTransition;
+        if (result?.applied) {
+          const nextStage = normalizeStage(result.session?.stageState || targetStage);
+          runContext.context.stageState = nextStage;
+          pushEvent(`Stage transition applied: ${nextStage}`);
+          onStageTransition?.(nextStage);
+          return `Transition approved. Current stage is now ${nextStage}.`;
+        }
+
+        return `Transition denied: ${result?.reason || "policy rejected"}. Stay in current stage.`;
+      } catch (error) {
+        pushEvent(`Stage transition tool failed: ${error.message}`);
+        return `Transition denied: ${error.message}`;
+      }
+    }
+  });
+
+  return new RealtimeAgent({
+    name: "networkingCoach",
+    voice: "alloy",
+    tools: [requestStageTransitionTool],
+    instructions: (runContext) =>
+      buildInstructions({
+        stageState: runContext?.context?.stageState,
+        contextSummary: runContext?.context?.contextSummary
+      })
+  });
+}
+
+export function useRealtimeSession({
+  sessionId,
+  stageState,
+  contextSummary,
+  onTranscriptEvent,
+  onStageTransition
+}) {
   const [status, setStatus] = useState("DISCONNECTED");
   const [events, setEvents] = useState([]);
-  const pcRef = useRef(null);
-  const audioRef = useRef(null);
-  const dataChannelRef = useRef(null);
-  const localStreamRef = useRef(null);
+  const sessionRef = useRef(null);
+  const agentRef = useRef(null);
+  const audioElementRef = useRef(null);
+  const transcriptHandlerRef = useRef(onTranscriptEvent);
+  const stageTransitionHandlerRef = useRef(onStageTransition);
+  const seenTranscriptRef = useRef(new Set());
+  const appliedContextRef = useRef({
+    stageState: "SMALL_TALK",
+    contextSummary: "Default networking context."
+  });
+
+  useEffect(() => {
+    transcriptHandlerRef.current = onTranscriptEvent;
+  }, [onTranscriptEvent]);
+
+  useEffect(() => {
+    stageTransitionHandlerRef.current = onStageTransition;
+  }, [onStageTransition]);
 
   const pushEvent = useCallback((message) => {
-    setEvents((prev) => [
-      {
-        ts: new Date().toISOString(),
-        message
-      },
-      ...prev
-    ].slice(0, 50));
+    setEvents((prev) =>
+      [
+        {
+          ts: new Date().toISOString(),
+          message
+        },
+        ...prev
+      ].slice(0, 80)
+    );
+  }, []);
+
+  const emitTranscript = useCallback((role, content, eventId = "", mode = "final") => {
+    const rawContent = typeof content === "string" ? content : "";
+    const normalizedContent = mode === "delta" ? rawContent : rawContent.trim();
+    if (!normalizedContent) {
+      return;
+    }
+
+    const normalizedRole = normalizeRole(role);
+    if (mode === "final") {
+      const key = `${eventId}:${normalizedRole}:${normalizedContent}`;
+      if (seenTranscriptRef.current.has(key)) {
+        return;
+      }
+      seenTranscriptRef.current.add(key);
+    }
+
+    transcriptHandlerRef.current?.({
+      role: normalizedRole,
+      content: normalizedContent,
+      eventId,
+      mode
+    });
   }, []);
 
   const disconnect = useCallback(() => {
-    if (dataChannelRef.current) {
-      dataChannelRef.current.close();
-      dataChannelRef.current = null;
+    if (sessionRef.current) {
+      sessionRef.current.close();
+      sessionRef.current = null;
     }
 
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
+    if (audioElementRef.current && document.body.contains(audioElementRef.current)) {
+      document.body.removeChild(audioElementRef.current);
+      audioElementRef.current = null;
     }
 
-    if (localStreamRef.current) {
-      for (const track of localStreamRef.current.getTracks()) {
-        track.stop();
-      }
-      localStreamRef.current = null;
-    }
-
+    agentRef.current = null;
     setStatus("DISCONNECTED");
     pushEvent("Realtime disconnected");
   }, [pushEvent]);
 
   const connect = useCallback(async () => {
-    if (pcRef.current) return;
+    if (sessionRef.current) {
+      return;
+    }
 
     setStatus("CONNECTING");
     pushEvent("Requesting realtime session token");
@@ -63,90 +284,136 @@ export function useRealtimeSession() {
       });
 
       const sessionPayload = await sessionResponse.json();
-      const ephemeralToken = parseEphemeralToken(sessionPayload);
+      if (!sessionResponse.ok) {
+        throw new Error(sessionPayload?.details || sessionPayload?.error || "Failed to create realtime token");
+      }
 
+      const ephemeralToken = parseEphemeralToken(sessionPayload);
       if (!ephemeralToken) {
         throw new Error("No ephemeral token returned by API");
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStreamRef.current = stream;
-
-      const pc = new RTCPeerConnection();
-      pcRef.current = pc;
-
-      if (!audioRef.current) {
-        const audioEl = document.createElement("audio");
-        audioEl.autoplay = true;
-        audioEl.style.display = "none";
-        document.body.appendChild(audioEl);
-        audioRef.current = audioEl;
+      if (!audioElementRef.current) {
+        const audioElement = document.createElement("audio");
+        audioElement.autoplay = true;
+        audioElement.style.display = "none";
+        document.body.appendChild(audioElement);
+        audioElementRef.current = audioElement;
       }
 
-      pc.ontrack = (event) => {
-        audioRef.current.srcObject = event.streams[0];
+      const runtimeContext = {
+        sessionId,
+        stageState: normalizeStage(stageState),
+        contextSummary: contextSummary || "Default networking context."
+      };
+      appliedContextRef.current = {
+        stageState: runtimeContext.stageState,
+        contextSummary: runtimeContext.contextSummary
       };
 
-      const dc = pc.createDataChannel("oai-events");
-      dataChannelRef.current = dc;
-      dc.onopen = () => pushEvent("Data channel connected");
-      dc.onclose = () => pushEvent("Data channel closed");
-      dc.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data?.type) {
-            pushEvent(`Event: ${data.type}`);
-          }
-        } catch {
-          pushEvent("Realtime message received");
+      const realtimeAgent = createNetworkingCoachAgent({
+        pushEvent,
+        onStageTransition: () => {
+          stageTransitionHandlerRef.current?.();
         }
-      };
+      });
+      agentRef.current = realtimeAgent;
 
-      for (const track of stream.getTracks()) {
-        pc.addTrack(track, stream);
-      }
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      const sdpResponse = await fetch(
-        `https://api.openai.com/v1/realtime?model=${encodeURIComponent(REALTIME_MODEL)}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${ephemeralToken}`,
-            "Content-Type": "application/sdp"
+      const realtimeSession = new RealtimeSession(realtimeAgent, {
+        transport: new OpenAIRealtimeWebRTC({
+          audioElement: audioElementRef.current
+        }),
+        model: REALTIME_MODEL,
+        config: {
+          inputAudioTranscription: {
+            model: "gpt-4o-mini-transcribe"
           },
-          body: offer.sdp
+          turn_detection: {
+            type: "server_vad",
+            threshold: 0.55,
+            prefix_padding_ms: 250,
+            silence_duration_ms: 700,
+            create_response: true,
+            interrupt_response: false
+          }
+        },
+        context: runtimeContext
+      });
+
+      realtimeSession.on("transport_event", (event) => {
+        if (!event?.type) {
+          return;
         }
-      );
 
-      if (!sdpResponse.ok) {
-        const text = await sdpResponse.text();
-        throw new Error(`SDP exchange failed (${sdpResponse.status}): ${text}`);
-      }
+        pushEvent(`Event: ${event.type}`);
 
-      const answer = {
-        type: "answer",
-        sdp: await sdpResponse.text()
-      };
+        if (event.type === "response.output_audio_transcript.delta" && event.delta) {
+          emitTranscript("assistant", event.delta, event.item_id || event.event_id || "assistant-live", "delta");
+        }
 
-      await pc.setRemoteDescription(answer);
+        if (event.type === "conversation.item.input_audio_transcription.completed") {
+          emitTranscript("user", event.transcript || "", event.item_id || event.event_id || "", "final");
+        }
+
+        if (event.type === "response.output_audio_transcript.done" || event.type === "response.audio_transcript.done") {
+          emitTranscript("assistant", event.transcript || "", event.item_id || event.event_id || "", "final");
+        }
+
+        if (
+          (event.type === "conversation.item.done" || event.type === "conversation.item.retrieved") &&
+          event.item?.type === "message"
+        ) {
+          const role = normalizeRole(event.item.role);
+          const content = extractMessageText(event.item.content || []);
+          emitTranscript(role, content, event.item.id || event.event_id || "", "final");
+        }
+      });
+
+      sessionRef.current = realtimeSession;
+      seenTranscriptRef.current = new Set();
+      await realtimeSession.connect({ apiKey: ephemeralToken });
+
       setStatus("CONNECTED");
       pushEvent("Realtime connected");
     } catch (error) {
+      console.error("Realtime connect failed", error);
       pushEvent(`Connect failed: ${error.message}`);
       disconnect();
     }
-  }, [disconnect, pushEvent]);
+  }, [contextSummary, disconnect, emitTranscript, pushEvent, sessionId, stageState]);
+
+  useEffect(() => {
+    if (status !== "CONNECTED" || !sessionRef.current) {
+      return;
+    }
+
+    const nextStage = normalizeStage(stageState);
+    const nextContext = contextSummary || "Default networking context.";
+    const currentApplied = appliedContextRef.current;
+
+    if (currentApplied.stageState === nextStage && currentApplied.contextSummary === nextContext) {
+      return;
+    }
+
+    appliedContextRef.current = {
+      stageState: nextStage,
+      contextSummary: nextContext
+    };
+
+    if (!agentRef.current) {
+      return;
+    }
+
+    sessionRef.current.context.context.stageState = nextStage;
+    sessionRef.current.context.context.contextSummary = nextContext;
+    sessionRef.current.updateAgent(agentRef.current).catch((error) => {
+      pushEvent(`Realtime context sync failed: ${error.message}`);
+    });
+  }, [contextSummary, pushEvent, stageState, status]);
 
   useEffect(() => {
     return () => {
       disconnect();
-      if (audioRef.current && document.body.contains(audioRef.current)) {
-        document.body.removeChild(audioRef.current);
-        audioRef.current = null;
-      }
     };
   }, [disconnect]);
 

@@ -42,267 +42,98 @@
 
 
 
-## Impelementatoin Plan
 
-  ## Summary
-
-  - 产品目标：做一个低延迟、可并发、可持续上下文的 AI networking/small-talk voice coach。
-  - 已锁定决策：
-      - 客户端：Web-only（不走 Chrome Extension）
-      - 后端：Node.js + GraphQL
-      - 编排：Dual-path（实时对话用 Realtime + tools；离线评估/总结用 LangGraph）
-      - 云：Vercel + GCP
-      - 迁移策略：Direct copy + rename，最大化复用 MARKII（Mark1）代码路径
-  - 核心原则：兼容 MARKII GraphQL 语义、快速上线 MVP、保证后续可扩展为生产级架构。
-
-  ## 一、系统架构（目标态）
-
-  ### 1) 前端（Web）
-
-  - 技术栈：Next.js 16 + React 19 + TypeScript + Tailwind + shadcn/ui + Framer Motion
-  - 状态与数据：
-      - 服务端状态：TanStack Query
-      - 客户端状态：Zustand
-      - GraphQL：graphql-request 或 urql + graphql-codegen
-  - 实时语音：
-      - 浏览器通过 WebRTC 连接 OpenAI Realtime
-      - 前端仅拿后端签发的短期 client_secret
-  - 关键页面：
-      - Context Setup：输入目标人物背景（LinkedIn 粘贴摘要 + 用户补充）
-      - Voice Practice：实时练习 + transcript
-      - Session Resume：恢复历史 session
-      - Evaluation：评分反馈 + follow-up email draft
-
-  ### 2) 后端（Node.js）
-
-  - 技术栈：Node.js 24 LTS + NestJS + Fastify + GraphQL Yoga + Prisma
-  - 存储：
-      - 主库：Cloud SQL PostgreSQL
-      - 向量检索：pgvector
-      - 缓存：Redis (Memorystore)
-      - 对象存储：GCS
-  - 服务划分：
-      - api-service：GraphQL BFF + auth + session/turn/memory 读写
-      - realtime-token-service（可并入 api）：签发 Realtime client secret
-      - worker-service：LangGraph 评分、总结、邮件生成（异步）
-
-  ### 3) AI Flow（双路径）
-
-  - 在线链路（低延迟）：
-      - Teacher Agent + deterministic tools（状态机）
-      - 每回合写入 turn；关键节点写 summary
-  - 离线链路（稳定可追踪）：
-      - session finalize 后入队
-      - LangGraph 执行：评分、改进建议、行动项、follow-up email
-  - 记忆系统：
-      - semantic / episodic / procedural 三桶模型
-      - 短期上下文 + session summary + 长期向量检索联合输入
-
-  ### 4) 云部署
-
-  - 前端：Vercel
-  - 后端/worker：Cloud Run
-  - 数据：Cloud SQL (HA) + Redis + GCS
-  - 异步任务：Cloud Tasks
-  - 可观测：OpenTelemetry + Cloud Logging + Cloud Trace
-  - 密钥：Secret Manager
-
-  ## 二、MARKII 复用映射（明确到文件）
-
-  ### 直接复用（先拷贝再改名）
-
-  - useRealtimeSession 逻辑
-    来源：/Users/daqingchen/Vocabulary-Builder-App/Mark1/src/hooks/useRealtimeSession.js
-  - Teacher Agent 指令框架
-    来源：/Users/daqingchen/Vocabulary-Builder-App/Mark1/src/agentConfigs/vocabularyTeacher.js
-  - Tool 状态机骨架
-    来源：/Users/daqingchen/Vocabulary-Builder-App/Mark1/src/utils/sceneTools.js
-  - Realtime token 签发逻辑
-    来源：/Users/daqingchen/Vocabulary-Builder-App/Mark1/voiceServer.js
-  - Memory 三桶思路
-    来源：/Users/daqingchen/Vocabulary-Builder-App/Mark1/memory/memoryServer.js
-
-  ### 必改项（NetAI 化）
-
-  - word/scene 语义改为 networking stage
-  - 移除 chrome.runtime 与 extension 专属权限链路
-  - localhost 常量改为环境配置
-  - GraphQL 端点从 Spring 迁移到 Node 实现
-  - 评分等级从 MARKII 的词汇评分模式改为 1-10 networking rubric
-
-  ## 三、前端实施计划
-
-  ### 模块拆分
-
-  1. features/context-setup
-
-  - 表单：目标人物背景、场景偏好、用户目标
-  - 默认上下文策略：未填写则用系统默认 persona
-
-  2. features/voice-practice
-
-  - 复用 realtime hook
-  - transcript 实时渲染
-  - stage 进度显示（small-talk -> experience -> advice -> close）
-
-  3. features/session-resume
-
-  - 按 sessionId 恢复：summary + recent turns + active stage
-
-  4. features/evaluation
-
-  - 展示评分维度、短板、下一次练习任务
-  - 一键生成 follow-up email（多语气）
-
-  ### 前端性能规范（强制）
-
-  - Server Components 优先；重交互组件 Client 化
-  - Suspense 分段加载
-  - 动态导入重模块
-  - 避免 barrel imports
-  - 图表/动画按需加载，避免首屏膨胀
-
-  ## 四、后端实施计划（Node + GraphQL）
-
-  ### GraphQL Schema 策略
-
-  - 保留 MARKII 兼容 mutation 语义：
-      - saveVocabulary
-      - startReviewSession
-      - saveReviewSession
-  - 新增 NetAI 域：
-      - startNetworkingSession(input)
-      - appendSessionTurn(input)
-      - finalizeNetworkingSession(sessionId)
-      - getSessionResume(sessionId)
-      - getSessionEvaluation(sessionId)
-      - generateFollowupEmail(input)
-
-  ### Resolver 最佳实践
-
-  - DataLoader 防 N+1
-  - Zod 输入验证
-  - 复杂度限制（depth/complexity）
-  - Persisted Queries（APQ）
-  - 字段级鉴权 + resource ownership check
-  - Idempotency key（关键 mutation）
-
-  ## 五、AI Flow 详细规范
-
-  ### 在线 Teacher 状态机
-
-  - 状态：NEED_STAGE -> IN_STAGE -> STAGE_DONE -> RATE_STAGE -> NEXT_STAGE -> DONE
-  - 工具：
-      - get_next_stage
-      - start_stage
-      - mark_stage_done
-      - request_stage_rating
-      - generate_followup_email
-  - 约束：只允许合法状态触发对应工具，非法调用直接拒绝
-
-  ### 离线 LangGraph 流
-
-  - 输入：完整 turn transcript + context + memory
-  - 输出（结构化 JSON）：
-      - score_1_10
-      - dimension_scores（开场、追问、行业洞察、收尾）
-      - strengths
-      - improvements
-      - next_practice_actions
-      - followup_email_draft
-  - 失败策略：重试 + 死信队列 + 幂等消费
-
-  ## 六、数据模型（MVP 必备）
-
-  - users
-  - sessions（goal, target_profile, stage_state, status）
-  - session_turns（role, content, timestamp）
-  - session_summaries（short_summary, key_topics）
-  - session_evaluations（score, rubric_json, feedback_json）
-  - followup_emails（draft, tone, version）
-  - memory_items（bucket, payload_json, embedding）
-  - job_runs（worker 状态追踪）
-
-  ## 七、云部署与运维
-
-  ### 环境
-
-  - dev / staging / prod 三环境隔离
-  - 每环境独立 DB/Redis/Secret
-
-  ### Cloud Run 配置
-
-  - API 服务：
-      - 最小实例：1（减少冷启动）
-      - 并发从 8 起压测调优
-  - Worker 服务：
-      - 按队列负载扩缩容
-      - 长任务超时单独配置
-
-  ### 安全
-
-  - Secret Manager 管理 API keys
-  - TLS 全链路
-  - 限流与WAF（公网入口）
-  - PII 最小化存储 + 日志脱敏
-
-  ## 八、测试与验收标准
-
-  ### 功能验收
-
-  1. 用户可创建 context 并开始语音练习
-  2. session 可中断后恢复
-  3. finalize 后可收到评分和邮件草稿
-  4. GraphQL 兼容老链路 operation 语义
-
-  ### 性能验收
-
-  1. 实时首包响应：p95 < 1.2s
-  2. GraphQL 常规读写：p95 < 250ms（不含异步任务）
-  3. 200 并发会话下系统稳定无雪崩
-
-  ### 质量验收
-
-  1. GraphQL contract tests（旧 schema 对比）
-  2. 状态机全路径单元测试
-  3. E2E：context -> voice -> finalize -> evaluation 全链路
-  4. Chaos 测试：worker 重试/超时/重复投递幂等
-
-  ## 九、里程碑（8 周）
-
-  1. Week 1
-
-  - 项目骨架、CI/CD、GraphQL schema 基线、数据库建模
-
-  2. Week 2-3
-
-  - 迁移 realtime hook + token endpoint + 基础 voice 页面
-
-  3. Week 4
-
-  - Teacher tools 状态机迁移为 networking stages
-
-  4. Week 5
-
-
-  - LangGraph worker（评分+总结+邮件）
-
-  6. Week 7
-
-  - GraphQL 兼容层打通（MARKII 操作语义复用）
-
-  7. Week 8
-
-  - 压测、可观测、灰度上线
-
-  ## 十、Assumptions & Defaults
-
-  - 以 Mark1 代码为唯一迁移源，不从 demo 视频反推行为。
-  - 首发 Web-only，不做 Extension 兼容。
-  - 后端统一 Node.js，Spring Boot 不再作为运行时依赖。
-  - GraphQL 为唯一前端 BFF；内部服务间通信可按需 REST/事件化。
-  - 优先上线 MVP，可在 Phase 2 再引入多区域和更强合规能力。
-
+## Implementation Plan (2026 Locked)
+
+### 1. Product target
+- Build a low-latency, concurrent, cloud-hosted AI networking coach.
+- Keep session-level memory so users can pause and resume in the same context.
+- Use Node.js + GraphQL backend, Next.js web frontend, dual-path AI flow (Realtime + Worker).
+
+### 2. Feature-to-implementation mapping (`## 功能` -> system)
+- Context customization interface:
+  - LinkedIn URL paste -> GraphQL `extractLinkedInProfileContext` to auto-build target profile context.
+  - Manual custom context supported (`targetProfileContext`, `customContext`).
+  - Default context fallback injected when user does not provide context.
+- Voice practice workflow interface:
+  - Stage machine implemented in backend store:
+    - `SMALL_TALK -> EXPERIENCE -> ADVICE -> WRAP_UP -> DONE`
+  - Stage auto-advances based on turn count + keyword triggers.
+  - Frontend shows stage progress and current stage hint.
+- Session persistence + resume:
+  - All turns saved in PostgreSQL (`session_turns`).
+  - Resume by session id using GraphQL `getSessionResume`.
+  - Homepage includes previous-session resume list by `userId`.
+- Evaluation + score:
+  - `finalizeNetworkingSession` queues worker evaluation.
+  - Worker returns strict JSON (score 1-10, strengths, improvements, next actions, follow-up email draft).
+- Follow-up email:
+  - One-click email generation via `generateFollowupEmail` mutation.
+
+### 3. Architecture
+
+#### Frontend (`apps/web`)
+- Next.js 16 + React 19 (JavaScript/JSX for current phase).
+- Main pages:
+  - Context Setup (`/`)
+  - Session Practice (`/session/[sessionId]`)
+- Realtime:
+  - WebRTC with OpenAI Realtime through backend-issued ephemeral token.
+  - Data channel events parsed into transcript turns and persisted to backend.
+
+#### Backend (`apps/api`)
+- Express + GraphQL Yoga.
+- PostgreSQL + Redis.
+- Security/perf baseline:
+  - `helmet`
+  - GraphQL rate limit
+  - GraphQL depth limit
+  - DataLoader for batch reads
+- Core GraphQL operations:
+  - NetAI: `startNetworkingSession`, `appendSessionTurn`, `finalizeNetworkingSession`, `getSessionResume`, `getSessionEvaluation`, `generateFollowupEmail`, `extractLinkedInProfileContext`
+  - MARKII compatibility: `saveVocabulary`, `startReviewSession`, `saveReviewSession`
+
+#### Worker (`apps/worker`)
+- Async evaluation endpoint (`/tasks/evaluate`).
+- Calls OpenAI Responses API with strict JSON schema output.
+
+### 4. AI flow (dual-path)
+- Online path (low latency):
+  - Realtime voice conversation + stage-aware instructions.
+  - Transcript streamed into session turns for persistence.
+- Offline path (stable evaluation):
+  - Finalize -> worker evaluates full transcript.
+  - Store score and coaching output for session review.
+
+### 5. Cloud deployment baseline
+- Web: Vercel.
+- API + Worker: Cloud Run.
+- Data: Cloud SQL PostgreSQL + Memorystore Redis.
+- Secrets: Secret Manager.
+- Async tasks and retries: Cloud Tasks (next hardening step).
+
+### 6. Quality gates
+- Functional:
+  - Context create -> voice practice -> finalize -> evaluation -> follow-up email all pass.
+  - Session interruption and resume works by session id.
+- Performance:
+  - Realtime connection and first response remain low-latency.
+  - API keeps stable under multi-session concurrent usage.
+- Reliability:
+  - Persisted history survives server restart.
+
+### 7. Current implementation status (this repo)
+- Completed in code:
+  - LinkedIn context extraction mutation and UI autofill flow.
+  - Session stage machine and stage progress UI.
+  - Realtime transcript event parsing + auto-persist to session turns.
+  - Session resume list from homepage.
+  - Evaluation + follow-up email chain.
+- Next production hardening:
+  - Auth/ownership guard.
+  - GraphQL complexity/APQ.
+  - Cloud Tasks idempotent delivery.
+  - OpenTelemetry tracing.
 
 ## NetAI Development Summary (2026-02-13)
 ### 已完成的开发落地（基于我们沟通的方案）
@@ -312,9 +143,9 @@
   - `apps/worker`（异步评分 worker）
   - `infra/cloudrun`（Cloud Run Dockerfiles）
 - 前端已实现：
-  - Context Setup 页面（创建 networking session）
-  - Session 页面（turn 追加、finalize、评估结果展示、follow-up email 展示）
-  - Realtime 连接 hook（通过后端 ephemeral token 建立 WebRTC）
+  - Context Setup 页面（创建 networking session、LinkedIn URL 自动提取 context、历史 session 恢复入口）
+  - Session 页面（turn 追加、阶段进度展示、finalize、评估结果展示、follow-up email 展示）
+  - Realtime 连接 hook（通过后端 ephemeral token 建立 WebRTC，解析转录事件并自动落库为 turns）
 - 后端已实现：
   - GraphQL NetAI 主链路：
     - `startNetworkingSession`
@@ -323,25 +154,35 @@
     - `getSessionResume`
     - `getSessionEvaluation`
     - `generateFollowupEmail`
+    - `extractLinkedInProfileContext`
   - MARKII 可复用业务语义链路（GraphQL）：
     - `saveVocabulary`
     - `startReviewSession`
     - `saveReviewSession`
   - REST endpoint：`POST /v1/realtime/sessions`（签发 OpenAI Realtime client secret）
+  - 持久化层已切换为 PostgreSQL + Redis：
+    - 新增 `PostgresStore` 替代 in-memory store
+    - API 启动时自动执行 schema 初始化（sessions/turns/evaluations/vocabulary/fsrs）
+    - 会话/评分/复习列表增加 Redis 缓存与失效策略
+  - GraphQL 生产强化（首批）：
+    - DataLoader（session/evaluation）
+    - Query depth limit
+    - GraphQL route rate limit
+    - `helmet` 安全头
 - AI flow 已落地为 dual-path：
-  - 在线：Realtime 语音对话
+  - 在线：Realtime 语音对话 + stage-aware 指令 + transcript 自动持久化
   - 离线：Finalize 后异步评分（worker 强制模型评估，无本地降级路径）
 - 文档与环境：
   - 根目录 `README.md` 已更新本地运行、环境变量、部署方向、你的介入点
   - `apps/api/.env.example`、`apps/web/.env.example`、`apps/worker/.env.example` 已添加
 
 ### 下一步开发优先级（实现生产级 best practice）
-1. 持久化层替换：in-memory -> PostgreSQL + Redis（Cloud SQL + Memorystore）
-2. GraphQL 生产强化：DataLoader、query complexity/depth limit、persisted queries
-3. 认证与授权：Clerk/Auth0 接入 + field-level ownership guard
-4. 观测性：OpenTelemetry、structured logs、trace propagation
-5. 队列与幂等：Cloud Tasks 投递 + worker 幂等消费
-6. Realtime 体验：转录/事件解析完善、中断恢复、session resume 精细化
+1. GraphQL 继续强化：query complexity + persisted queries + resolver-level auth guard
+2. 认证与授权：Clerk/Auth0 接入 + field-level ownership guard
+3. 观测性：OpenTelemetry、structured logs、trace propagation
+4. 队列与幂等：Cloud Tasks 投递 + worker 幂等消费
+5. Realtime 体验：中断恢复、回声/噪声处理、session resume 精细化
+6. 数据层演进：pgvector 记忆检索 + DB migration/versioning pipeline
 
 ### 你需要介入的节点（我会在执行时提醒）
 - Vercel project 创建与 env 配置
