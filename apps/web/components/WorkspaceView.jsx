@@ -418,7 +418,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
             }
             resumeRefreshTimerRef.current = setTimeout(() => {
               loadResume(sessionIdSnapshot).catch(() => {});
-            }, 260);
+            }, 1200);
           })
           .catch(() => {});
       }
