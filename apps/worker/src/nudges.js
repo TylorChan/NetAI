@@ -51,7 +51,7 @@ export async function generateNudges({ session, conversationSummary, recentTurns
     throw new Error("OPENAI_API_KEY is required in worker");
   }
 
-  const model = process.env.NUDGE_MODEL || "gpt-5-mini";
+  const model = process.env.NUDGE_MODEL || "gpt-5-nano";
   const llm = new ChatOpenAI({
     apiKey,
     model

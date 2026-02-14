@@ -33,7 +33,7 @@ export async function generateSessionMetadata({ goal, targetProfileContext, cust
     throw new Error("OPENAI_API_KEY is required in worker");
   }
 
-  const model = process.env.SESSION_METADATA_MODEL || "gpt-5-mini";
+  const model = process.env.SESSION_METADATA_MODEL || "gpt-5-nano";
   const llm = new ChatOpenAI({
     apiKey,
     model
