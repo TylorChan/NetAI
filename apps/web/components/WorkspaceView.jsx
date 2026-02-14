@@ -1286,13 +1286,6 @@ export default function WorkspaceView({ initialSessionId = null }) {
                         </div>
                       </div>
 
-                      {resume?.session?.status === "PROCESSING_EVALUATION" ? (
-                        <p className="muted with-inline-spinner">
-                          <LoadingSpinner />
-                          <span>Evaluation in progress...</span>
-                        </p>
-                      ) : null}
-
                       {resume?.session?.status === "EVALUATION_FAILED" ? (
                         <p className="error">Evaluation failed. Please click Finalize + Evaluate again.</p>
                       ) : null}
