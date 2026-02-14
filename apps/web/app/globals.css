@@ -385,7 +385,7 @@ body.session-mode .shell {
 .chat-content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 0;
-  transition: grid-template-columns 240ms ease;
+  transition: grid-template-columns 320ms cubic-bezier(0.16, 1.2, 0.3, 1);
   min-height: 100%;
   overflow: hidden;
 }
@@ -925,8 +925,8 @@ body.session-mode .shell {
   opacity: 0;
   pointer-events: none;
   transition:
-    transform 380ms cubic-bezier(0.16, 1.2, 0.3, 1),
-    opacity 220ms ease;
+    transform 520ms cubic-bezier(0.16, 1.2, 0.3, 1),
+    opacity 320ms ease;
 }
 
 .email-drawer.open {
@@ -950,6 +950,12 @@ body.session-mode .shell {
 
 .email-drawer h3 {
   margin: 0;
+}
+
+.email-drawer-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .composer-overlay {

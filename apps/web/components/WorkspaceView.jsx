@@ -216,6 +216,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const [evaluation, setEvaluation] = useState(null);
   const [liveTurns, setLiveTurns] = useState({});
   const [followupEmail, setFollowupEmail] = useState(null);
+  const [showEmailDrawer, setShowEmailDrawer] = useState(false);
   const [showEvaluationModal, setShowEvaluationModal] = useState(false);
   const [autoOpenEvalSessionId, setAutoOpenEvalSessionId] = useState(null);
   const [scoreExpanded, setScoreExpanded] = useState(false);
@@ -508,6 +509,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
     setShowEvaluationModal(false);
     setScoreExpanded(false);
     setFollowupEmail(null);
+    setShowEmailDrawer(false);
     setLiveTurns({});
     setShowSessionLoadingHint(false);
     finalTranscriptKeysRef.current = new Set();
@@ -962,6 +964,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
 
     setEmailLoading(true);
     setError("");
+    setShowEmailDrawer(true);
 
     try {
       const data = await graphqlRequest(mutations.generateFollowupEmail, {
@@ -977,6 +980,14 @@ export default function WorkspaceView({ initialSessionId = null }) {
     } finally {
       setEmailLoading(false);
     }
+  }
+
+  function handleEmailAction() {
+    if (followupEmail) {
+      setShowEmailDrawer(true);
+      return;
+    }
+    handleGenerateEmail().catch(() => {});
   }
 
   async function handleFinalizeAction() {
@@ -1123,7 +1134,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
 
       <div className="chat-main">
         <div
-          className={`chat-content ${followupEmail ? "with-email" : ""} ${
+          className={`chat-content ${showEmailDrawer ? "with-email" : ""} ${
             showEvaluationModal ? "is-blurred" : ""
           }`}
         >
@@ -1200,12 +1211,18 @@ export default function WorkspaceView({ initialSessionId = null }) {
 
                       <button
                         type="button"
-                        onClick={handleGenerateEmail}
+                        onClick={handleEmailAction}
                         className="with-spinner"
                         disabled={emailLoading}
                       >
                         {emailLoading ? <LoadingSpinner /> : null}
-                        <span>{emailLoading ? "Generating..." : "Generate Follow-up Email"}</span>
+                        <span>
+                          {emailLoading
+                            ? "Generating..."
+                            : followupEmail
+                              ? "See Follow-up Email"
+                              : "Generate Follow-up Email"}
+                        </span>
                       </button>
 
                       <button
@@ -1333,12 +1350,12 @@ export default function WorkspaceView({ initialSessionId = null }) {
             )}
           </div>
 
-          <aside className={`email-drawer ${followupEmail && hasSelectedSession ? "open" : ""}`}>
+          <aside className={`email-drawer ${showEmailDrawer && hasSelectedSession ? "open" : ""}`}>
             <div className="email-drawer-card">
               <div className="email-drawer-header">
                 <h3>Follow-up Email</h3>
-                {followupEmail ? (
-                  <button type="button" className="ghost-button" onClick={() => setFollowupEmail(null)}>
+                {showEmailDrawer ? (
+                  <button type="button" className="ghost-button" onClick={() => setShowEmailDrawer(false)}>
                     Hide
                   </button>
                 ) : null}
@@ -1349,6 +1366,17 @@ export default function WorkspaceView({ initialSessionId = null }) {
                     <strong>Subject:</strong> {followupEmail.subject}
                   </p>
                   <pre>{followupEmail.body}</pre>
+                  <div className="email-drawer-actions">
+                    <button
+                      type="button"
+                      className="ghost-button with-spinner"
+                      onClick={handleGenerateEmail}
+                      disabled={emailLoading}
+                    >
+                      {emailLoading ? <LoadingSpinner /> : null}
+                      <span>{emailLoading ? "Regenerating..." : "Regenerate"}</span>
+                    </button>
+                  </div>
                 </>
               ) : (
                 <p className="muted">Generate follow-up email to show draft here.</p>
