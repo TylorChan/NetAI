@@ -1180,7 +1180,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
                       {realtimeStatus === "CONNECTED" ? (
                         <button type="button" onClick={disconnect} className="connect-agent-button">
                           <span className="connect-dot on" aria-hidden="true" />
-                          Disconnect Agent
+                          Disconnect
                         </button>
                       ) : (
                         <button
@@ -1194,7 +1194,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
                             className={`connect-dot ${realtimeStatus === "CONNECTED" ? "on" : ""}`}
                             aria-hidden="true"
                           />
-                          <span>{realtimeStatus === "CONNECTING" ? "Connecting..." : "Connect Agent"}</span>
+                          <span>{realtimeStatus === "CONNECTING" ? "Connecting..." : "Connect"}</span>
                         </button>
                       )}
 
