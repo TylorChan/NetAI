@@ -7,6 +7,20 @@ function tonePrefix(tone) {
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 
+function redactInternalIds(text) {
+  const raw = String(text || "");
+  if (!raw.trim()) return "";
+
+  // Remove UUID-like tokens and other internal identifiers that should never
+  // appear in a user-facing email.
+  const withoutUuids = raw.replace(
+    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+    ""
+  );
+
+  return withoutUuids.replace(/[ \t]{2,}/g, " ").trim();
+}
+
 function readResponseText(payload) {
   if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
     return payload.output_text.trim();
@@ -44,17 +58,19 @@ function formatFullTranscript(turns) {
 function lengthRule(length) {
   const normalized = String(length || "medium").toLowerCase();
   if (normalized === "short") {
-    return "70-110 words";
+    return "60-90 words";
   }
   if (normalized === "long") {
-    return "150-220 words";
+    return "120-160 words";
   }
-  return "110-160 words";
+  return "90-130 words";
 }
 
 async function generateWithModel({
   openAiApiKey,
   model,
+  senderName,
+  senderEmail,
   session,
   evaluation,
   turns,
@@ -74,7 +90,7 @@ async function generateWithModel({
     },
     body: JSON.stringify({
       model: model || "gpt-5.2",
-      max_output_tokens: 700,
+      max_output_tokens: 520,
       input: [
         {
           role: "system",
@@ -84,9 +100,13 @@ async function generateWithModel({
               text: [
                 "You write high-quality follow-up emails for real networking contacts.",
                 "The sender is the user. The recipient is the real-world target person they practiced talking to.",
-                "Write naturally, specific to their conversation, and relationship-aware.",
+                "Write naturally, concise, specific to their conversation, and relationship-aware.",
+                "Keep it skimmable: 2 short paragraphs + sign-off.",
+                "Send-within-24h vibe: grateful, specific, and clear next step.",
                 "Never mention AI, simulation, role-play, transcript, or evaluation score.",
                 "Never invent facts not supported by goal/context/transcript.",
+                "Never include any internal IDs/UUIDs, session IDs, or database identifiers.",
+                "If a name is not explicitly provided, use a neutral greeting like 'Hi,'.",
                 "Output strictly two fields in plain text:",
                 "Subject: ...",
                 "Body: ..."
@@ -100,7 +120,8 @@ async function generateWithModel({
             {
               type: "input_text",
               text: [
-                `Sender name: ${session.userId}`,
+                `Sender name: ${senderName}`,
+                `Sender email (do not include unless asked): ${senderEmail || "Not provided"}`,
                 `Networking goal: ${session.goal}`,
                 `Target person context: ${session.targetProfileContext || "Not provided"}`,
                 `Practice intent: ${session.customContext || "Not provided"}`,
@@ -112,12 +133,15 @@ async function generateWithModel({
                 transcript || "No transcript available",
                 "",
                 "Rules:",
-                "- Subject should be specific and not generic (no 'Follow-up from our chat').",
+                "- Subject must be specific and not generic (no 'Follow-up from our chat').",
+                "- Subject should hint utility or a memorable detail from the conversation.",
                 "- Body must sound like the user writing to this real person.",
-                "- Mention at least two concrete details from the conversation.",
-                "- Ask for one concrete next-step suggestion.",
-                "- End with a natural sign-off and sender name.",
-                "- Do not use placeholders."
+                "- Mention 1-2 concrete details from the conversation (no more).",
+                "- Include one clear call-to-action question (easy to answer).",
+                "- Put the ask in the second paragraph (not buried).",
+                "- End with a natural sign-off and sender name only.",
+                "- Do not use placeholders or brackets.",
+                "- Do not include any IDs/UUID-like strings even if present above."
               ].join("\n")
             }
           ]
@@ -143,8 +167,8 @@ async function generateWithModel({
   }
 
   return {
-    subject: subjectMatch[1].trim(),
-    body: bodyMatch[1].trim()
+    subject: redactInternalIds(subjectMatch[1]),
+    body: redactInternalIds(bodyMatch[1])
   };
 }
 
@@ -156,12 +180,17 @@ export function createFollowupEmailService({ store, openAiApiKey, model = "gpt-5
         throw new Error("session not found");
       }
 
+      const userRow = await store.getUserById(session.userId);
+      const senderName = String(userRow?.name || "").trim() || "There";
+      const senderEmail = String(userRow?.email || "").trim();
       const evaluation = await store.getEvaluation(sessionId);
       const turns = await store.getTurns(sessionId);
 
       const generated = await generateWithModel({
         openAiApiKey,
         model,
+        senderName,
+        senderEmail,
         session,
         evaluation,
         turns,
@@ -178,13 +207,11 @@ export function createFollowupEmailService({ store, openAiApiKey, model = "gpt-5
       const longBody = `${prefix}. Thank you again for sharing your time and advice on ${session.goal}. I learned a lot from your perspective, especially around how to ask clearer questions and connect my project experience to business outcomes. I am actively practicing and would greatly appreciate one additional suggestion on what to focus on next. If it is helpful, I can also share a brief summary of how I apply your advice in my next conversation.`;
 
       const body = length === "short" ? shortBody : length === "long" ? longBody : mediumBody;
-      const withFeedback = evaluation
-        ? `${body}\n\nP.S. My latest practice score is ${evaluation.score}/10 and I am focusing on: ${evaluation.nextActions[0]}.`
-        : body;
+      const withFeedback = body;
 
       return {
-        subject: `Follow-up from our networking chat on ${session.goal}`,
-        body: `Hi,\n\n${withFeedback}\n\nBest regards,\n${session.userId}`
+        subject: `Quick follow-up on ${session.goal}`,
+        body: `Hi,\n\n${withFeedback}\n\nBest regards,\n${senderName}`
       };
     }
   };
