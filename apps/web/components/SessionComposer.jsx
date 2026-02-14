@@ -10,7 +10,6 @@ const DEFAULT_CUSTOM_CONTEXT =
   "Practice friendly small-talk opening, ask deeper project questions, then close with one recruiting advice request.";
 
 export default function SessionComposer({
-  defaultUserId = "default-user",
   onCreated,
   onCancel,
   mode = "inline"
@@ -18,7 +17,6 @@ export default function SessionComposer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
-    userId: defaultUserId,
     goal: "Networking with software engineering managers",
     targetProfileContext: "",
     customContext: ""
@@ -45,7 +43,6 @@ export default function SessionComposer({
 
       const data = await graphqlRequest(mutations.startNetworkingSession, {
         input: {
-          userId: form.userId.trim(),
           goal: form.goal.trim(),
           targetProfileContext,
           customContext
@@ -53,8 +50,7 @@ export default function SessionComposer({
       });
 
       onCreated?.({
-        sessionId: data.startNetworkingSession.id,
-        userId: data.startNetworkingSession.userId
+        sessionId: data.startNetworkingSession.id
       });
     } catch (submitError) {
       setError(submitError.message);
@@ -74,11 +70,6 @@ export default function SessionComposer({
             </button>
           ) : null}
         </div>
-
-        <label>
-          User ID
-          <input name="userId" value={form.userId} onChange={onChange} required />
-        </label>
 
         <label>
           Goal

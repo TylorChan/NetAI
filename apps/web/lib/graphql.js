@@ -7,6 +7,7 @@ export async function graphqlRequest(query, variables = {}) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({ query, variables }),
+    credentials: "include",
     cache: "no-store"
   });
 
@@ -99,6 +100,16 @@ export const mutations = {
 };
 
 export const queries = {
+  me: `
+    query Me {
+      me {
+        id
+        email
+        name
+        createdAt
+      }
+    }
+  `,
   getSessionResume: `
     query GetSessionResume($sessionId: ID!) {
       getSessionResume(sessionId: $sessionId) {
@@ -140,8 +151,8 @@ export const queries = {
     }
   `,
   sessions: `
-    query Sessions($userId: String!) {
-      sessions(userId: $userId) {
+    query Sessions {
+      sessions {
         id
         goal
         status

@@ -280,7 +280,8 @@ export function useRealtimeSession({
       const sessionResponse = await fetch(`${API_BASE_URL}/v1/realtime/sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: REALTIME_MODEL })
+        body: JSON.stringify({ model: REALTIME_MODEL }),
+        credentials: "include"
       });
 
       const sessionPayload = await sessionResponse.json();

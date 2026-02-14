@@ -1,4 +1,5 @@
 import "dotenv/config";
+import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -18,6 +19,8 @@ import { PostgresStore } from "./store/postgresStore.js";
 import { createLogger } from "./utils/logger.js";
 import { readRuntimeConfig } from "./db/env.js";
 import { initializeDatabase } from "./db/initDb.js";
+import { getUserFromHeaders } from "./auth/session.js";
+import { registerAuthRoutes } from "./routes/authRoutes.js";
 
 const logger = createLogger("api");
 
@@ -72,9 +75,18 @@ async function bootstrap() {
     graphqlEndpoint: "/graphql",
     maskedErrors: true,
     validationRules: [depthLimit(config.graphqlMaxDepth)],
-    context: async () => ({
-      loaders: createLoaders(store)
-    })
+    context: async ({ request }) => {
+      const user = getUserFromHeaders({
+        cookieHeader: request.headers.get("cookie") || "",
+        authorizationHeader: request.headers.get("authorization") || "",
+        jwtSecret: config.jwtSecret
+      });
+
+      return {
+        user,
+        loaders: createLoaders(store)
+      };
+    }
   });
 
   const app = express();
@@ -82,9 +94,11 @@ async function bootstrap() {
 
   app.use(
     cors({
-      origin: config.corsOrigin
+      origin: config.corsOrigin,
+      credentials: true
     })
   );
+  app.use(cookieParser());
   app.use(
     helmet({
       crossOriginResourcePolicy: false
@@ -92,6 +106,8 @@ async function bootstrap() {
   );
 
   app.use("/v1", express.json({ limit: "1mb" }));
+
+  registerAuthRoutes({ app, store, config, logger });
 
   const graphqlLimiter = rateLimit({
     windowMs: config.graphqlRateLimitWindowMs,
@@ -112,6 +128,15 @@ async function bootstrap() {
 
   app.post("/v1/realtime/sessions", async (req, res) => {
     try {
+      const user = getUserFromHeaders({
+        cookieHeader: req.headers.cookie || "",
+        authorizationHeader: req.headers.authorization || "",
+        jwtSecret: config.jwtSecret
+      });
+      if (!user?.id) {
+        return res.status(401).json({ error: "UNAUTHENTICATED" });
+      }
+
       const { model, voice } = req.body || {};
 
       const payload = await createRealtimeSession({

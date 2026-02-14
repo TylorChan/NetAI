@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import LoadingSpinner from "@/components/LoadingSpinner";
+import AuthForm from "@/components/AuthForm";
 import SessionComposer from "@/components/SessionComposer";
 import TranscriptPanel from "@/components/TranscriptPanel";
 import { graphqlRequest, mutations, queries } from "@/lib/graphql";
 import { useRealtimeSession } from "@/features/voice/useRealtimeSession";
+import { authMe } from "@/lib/auth";
 
 const STAGE_SEQUENCE = ["SMALL_TALK", "EXPERIENCE", "ADVICE", "WRAP_UP", "DONE"];
 
@@ -204,7 +206,8 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const evaluationCacheRef = useRef({});
 
   const [activeSessionId, setActiveSessionId] = useState(initialSessionId);
-  const [currentUserId, setCurrentUserId] = useState(initialSessionId ? "" : "default-user");
+  const [authStatus, setAuthStatus] = useState("loading"); // loading | authed | none
+  const [currentUser, setCurrentUser] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [resume, setResume] = useState(null);
   const [showSessionLoadingHint, setShowSessionLoadingHint] = useState(false);
@@ -227,37 +230,64 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const [sessionMenuPos, setSessionMenuPos] = useState(null);
   const [sessionActionBusyId, setSessionActionBusyId] = useState("");
 
-  const hasSelectedSession = Boolean(activeSessionId);
-  const activeSessionReady = resume?.session?.id === activeSessionId;
+  const isAuthed = authStatus === "authed";
+  const hasSelectedSession = isAuthed && Boolean(activeSessionId);
+  const activeSessionReady = isAuthed && resume?.session?.id === activeSessionId;
   const isSessionLoading = hasSelectedSession && !activeSessionReady;
   const shouldShowSessionLoader = isSessionLoading && showSessionLoadingHint;
 
-  const loadSessions = useCallback(async (userId) => {
-    if (!userId?.trim()) {
+  const clearAuth = useCallback(() => {
+    setAuthStatus("none");
+    setCurrentUser(null);
+    setSessions([]);
+    setResume(null);
+    setEvaluation(null);
+    setFollowupEmail(null);
+    setLiveTurns({});
+    setShowComposerOverlay(false);
+    setComposerOverlayPhase("closed");
+  }, []);
+
+  const loadSessions = useCallback(async () => {
+    if (!isAuthed) {
       return;
     }
 
     setLoadingSessions(true);
     try {
-      const data = await graphqlRequest(queries.sessions, { userId: userId.trim() });
+      const data = await graphqlRequest(queries.sessions);
       setSessions(data.sessions || []);
+    } catch (loadError) {
+      if (loadError?.message === "UNAUTHENTICATED") {
+        clearAuth();
+        return;
+      }
+      throw loadError;
     } finally {
       setLoadingSessions(false);
     }
-  }, []);
+  }, [clearAuth, isAuthed]);
 
-  const loadResume = useCallback(async (sessionId) => {
-    if (!sessionId) {
-      setResume(null);
-      return;
-    }
+  const loadResume = useCallback(
+    async (sessionId) => {
+      if (!sessionId) {
+        setResume(null);
+        return;
+      }
 
-    const data = await graphqlRequest(queries.getSessionResume, { sessionId });
-    setResume(data.getSessionResume);
-    if (data.getSessionResume?.session?.userId) {
-      setCurrentUserId(data.getSessionResume.session.userId);
-    }
-  }, []);
+      try {
+        const data = await graphqlRequest(queries.getSessionResume, { sessionId });
+        setResume(data.getSessionResume);
+      } catch (loadError) {
+        if (loadError?.message === "UNAUTHENTICATED") {
+          clearAuth();
+          return;
+        }
+        throw loadError;
+      }
+    },
+    [clearAuth]
+  );
 
   const loadEvaluation = useCallback(async (sessionId) => {
     if (!sessionId) {
@@ -265,10 +295,18 @@ export default function WorkspaceView({ initialSessionId = null }) {
       return;
     }
 
-    const data = await graphqlRequest(queries.getSessionEvaluation, { sessionId });
-    evaluationCacheRef.current[sessionId] = data.getSessionEvaluation;
-    setEvaluation(data.getSessionEvaluation);
-  }, []);
+    try {
+      const data = await graphqlRequest(queries.getSessionEvaluation, { sessionId });
+      evaluationCacheRef.current[sessionId] = data.getSessionEvaluation;
+      setEvaluation(data.getSessionEvaluation);
+    } catch (loadError) {
+      if (loadError?.message === "UNAUTHENTICATED") {
+        clearAuth();
+        return;
+      }
+      throw loadError;
+    }
+  }, [clearAuth]);
 
   const appendTurnLocal = useCallback((sessionId, role, content) => {
     setResume((prev) => {
@@ -401,6 +439,31 @@ export default function WorkspaceView({ initialSessionId = null }) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    authMe()
+      .then((user) => {
+        if (cancelled) return;
+        if (user?.id) {
+          setCurrentUser(user);
+          setAuthStatus("authed");
+          return;
+        }
+        setCurrentUser(null);
+        setAuthStatus("none");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCurrentUser(null);
+        setAuthStatus("none");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     function onPopState() {
       const sessionId = sessionIdFromPath(window.location.pathname);
       setActiveSessionId(sessionId);
@@ -411,8 +474,12 @@ export default function WorkspaceView({ initialSessionId = null }) {
   }, []);
 
   useEffect(() => {
-    loadSessions(currentUserId).catch((loadError) => setError(loadError.message));
-  }, [currentUserId, loadSessions]);
+    if (!isAuthed) {
+      return;
+    }
+
+    loadSessions().catch((loadError) => setError(loadError.message));
+  }, [isAuthed, loadSessions]);
 
   useEffect(() => {
     setShowEvaluationModal(false);
@@ -425,7 +492,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
       clearTimeout(sessionLoaderTimerRef.current);
     }
 
-    if (!activeSessionId) {
+    if (!isAuthed || !activeSessionId) {
       setResume(null);
       setEvaluation(null);
       return;
@@ -452,7 +519,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
         }
       });
     loadEvaluation(activeSessionId).catch(() => {});
-  }, [activeSessionId, loadEvaluation, loadResume]);
+  }, [activeSessionId, isAuthed, loadEvaluation, loadResume]);
 
   useEffect(() => {
     if (!activeSessionId || !resume?.session) {
@@ -624,7 +691,23 @@ export default function WorkspaceView({ initialSessionId = null }) {
     });
   }
 
+  const handleAuthed = useCallback(
+    (user) => {
+      if (!user?.id) {
+        return;
+      }
+      setCurrentUser(user);
+      setAuthStatus("authed");
+      setError("");
+    },
+    [setAuthStatus]
+  );
+
   function startComposerOverlay() {
+    if (!isAuthed) {
+      return;
+    }
+
     setNewSessionButtonFading(true);
     if (newSessionTimerRef.current) {
       clearTimeout(newSessionTimerRef.current);
@@ -650,19 +733,20 @@ export default function WorkspaceView({ initialSessionId = null }) {
   }
 
   function handleSessionClick(sessionId) {
+    if (!isAuthed) {
+      return;
+    }
     setOpenSessionMenuId(null);
     setSessionMenuPos(null);
     setActiveSessionId(sessionId);
     syncUrl(sessionId, "push");
   }
 
-  function handleCreatedSession({ sessionId, userId }) {
-    const nextUserId = userId || "default-user";
-    setCurrentUserId(nextUserId);
+  function handleCreatedSession({ sessionId }) {
     setActiveSessionId(sessionId);
     setAutoOpenEvalSessionId(null);
     syncUrl(sessionId, "push");
-    loadSessions(nextUserId).catch(() => {});
+    loadSessions().catch(() => {});
 
     if (showComposerOverlay) {
       closeComposerOverlay();
@@ -841,20 +925,29 @@ export default function WorkspaceView({ initialSessionId = null }) {
             type="button"
             className={`ghost-button new-session-trigger ${newSessionButtonFading ? "is-fading" : ""}`}
             onClick={startComposerOverlay}
-            disabled={showComposerOverlay}
+            disabled={!isAuthed || authStatus === "loading" || showComposerOverlay}
           >
             + New Session
           </button>
         </div>
 
         <div className="chat-session-list">
-          {loadingSessions && sessions.length === 0 ? (
+          {authStatus === "loading" ? (
+            <p className="muted with-inline-spinner">
+              <LoadingSpinner />
+              <span>Checking account...</span>
+            </p>
+          ) : null}
+          {!isAuthed ? <p className="muted">Sign in to start.</p> : null}
+          {isAuthed && loadingSessions && sessions.length === 0 ? (
             <p className="muted with-inline-spinner">
               <LoadingSpinner />
               <span>Loading sessions...</span>
             </p>
           ) : null}
-          {!loadingSessions && sessions.length === 0 ? <p className="muted">No sessions yet.</p> : null}
+          {isAuthed && !loadingSessions && sessions.length === 0 ? (
+            <p className="muted">No sessions yet.</p>
+          ) : null}
           {sessions.map((session) => (
             <div
               key={session.id}
@@ -866,6 +959,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
                 type="button"
                 className="session-list-main"
                 onClick={() => handleSessionClick(session.id)}
+                disabled={!isAuthed}
               >
                 <strong>{session.goal}</strong>
                 <span>{session.status}</span>
@@ -879,7 +973,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
                   onClick={(event) => handleSessionMenuToggle(event, session)}
                   aria-label="Open session actions"
                   aria-expanded={openSessionMenuId === session.id}
-                  disabled={sessionActionBusyId === session.id}
+                  disabled={!isAuthed || sessionActionBusyId === session.id}
                 >
                   {sessionActionBusyId === session.id ? <LoadingSpinner size="small" /> : <span>⋯</span>}
                 </button>
@@ -889,7 +983,11 @@ export default function WorkspaceView({ initialSessionId = null }) {
         </div>
 
         <div className="chat-sidebar-foot">
-          <p className="muted">{currentUserId}</p>
+          {isAuthed && currentUser ? (
+            <p className="muted" title={currentUser.email}>
+              {currentUser.name}
+            </p>
+          ) : null}
         </div>
       </aside>
 
@@ -927,12 +1025,16 @@ export default function WorkspaceView({ initialSessionId = null }) {
               <div className="empty-stage">
                 <div className="empty-stage-hero">
                   <p className="empty-stage-kicker">NetAI</p>
-                  <h1>{isFirstSession ? "Let's Small-Talk Better." : "Pick a Session and Continue."}</h1>
+                  <h1>{isAuthed ? (isFirstSession ? "Let's Small-Talk Better." : "Pick a Session and Continue.") : "Let's Small-Talk Better."}</h1>
                   <p>
-                    {isFirstSession
-                      ? "Click + New Session in the left panel to start your first practice."
-                      : "Select any session on the left, or click + New Session to create a new one."}
+                    {isAuthed
+                      ? isFirstSession
+                        ? "Click + New Session in the left panel to start your first practice."
+                        : "Select any session on the left, or click + New Session to create a new one."
+                      : "Create an account or sign in to unlock private sessions."}
                   </p>
+
+                  {!isAuthed ? <AuthForm onAuthed={handleAuthed} /> : null}
                 </div>
               </div>
             ) : !displayedSessionReady ? (
@@ -1139,7 +1241,6 @@ export default function WorkspaceView({ initialSessionId = null }) {
           <div className={`composer-overlay ${composerOverlayPhase}`}>
             <div className={`composer-overlay-card ${composerOverlayPhase}`}>
               <SessionComposer
-                defaultUserId={currentUserId}
                 onCreated={handleCreatedSession}
                 onCancel={closeComposerOverlay}
                 mode="overlay"

@@ -1,4 +1,11 @@
 export const typeDefs = /* GraphQL */ `
+  type User {
+    id: ID!
+    email: String!
+    name: String!
+    createdAt: String!
+  }
+
   type Session {
     id: ID!
     userId: String!
@@ -60,7 +67,6 @@ export const typeDefs = /* GraphQL */ `
   }
 
   input StartNetworkingSessionInput {
-    userId: String!
     goal: String!
     targetProfileContext: String
     customContext: String
@@ -127,7 +133,6 @@ export const typeDefs = /* GraphQL */ `
     realLifeDef: String
     surroundingText: String
     videoTitle: String
-    userId: String
   }
 
   input CardUpdateInput {
@@ -142,8 +147,10 @@ export const typeDefs = /* GraphQL */ `
 
   type Query {
     ping: String!
+    me: User
+
+    sessions: [Session!]!
     session(id: ID!): Session
-    sessions(userId: String!): [Session!]!
     getSessionResume(sessionId: ID!): NetworkingSessionResume
     getSessionEvaluation(sessionId: ID!): SessionEvaluation
   }
@@ -158,7 +165,8 @@ export const typeDefs = /* GraphQL */ `
     generateFollowupEmail(input: GenerateFollowupEmailInput!): FollowupEmailSuggestion!
 
     saveVocabulary(input: VocabularyInput!): VocabularyEntry!
-    startReviewSession(userId: String!): [VocabularyEntry!]!
+    startReviewSession: [VocabularyEntry!]!
     saveReviewSession(updates: [CardUpdateInput!]!): SaveReviewSessionPayload!
   }
 `;
+

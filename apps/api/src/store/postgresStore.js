@@ -118,6 +118,47 @@ export class PostgresStore {
     this.logger = logger;
   }
 
+  async countUsers() {
+    const result = await this.pool.query(`SELECT COUNT(*)::int AS count FROM users`);
+    return result.rows?.[0]?.count || 0;
+  }
+
+  async getUserByEmail(email) {
+    const result = await this.pool.query(`SELECT * FROM users WHERE email = $1 LIMIT 1`, [email]);
+    return result.rows[0] || null;
+  }
+
+  async getUserById(id) {
+    const result = await this.pool.query(`SELECT * FROM users WHERE id = $1 LIMIT 1`, [id]);
+    return result.rows[0] || null;
+  }
+
+  async createUser({ id, email, name, passwordHash }) {
+    const ts = nowIso();
+    const result = await this.pool.query(
+      `
+      INSERT INTO users (id, email, name, password_hash, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $5)
+      RETURNING *
+      `,
+      [id, email, name, passwordHash, ts]
+    );
+
+    return result.rows[0];
+  }
+
+  async migrateLegacyDefaultUser({ newUserId }) {
+    const legacyId = "default-user";
+    await this.pool.query(`UPDATE sessions SET user_id = $1 WHERE user_id = $2`, [newUserId, legacyId]);
+    await this.pool.query(`UPDATE vocabulary_entries SET user_id = $1 WHERE user_id = $2`, [
+      newUserId,
+      legacyId
+    ]);
+    await this.cacheDel(sessionsListCacheKey(legacyId), sessionsListCacheKey(newUserId));
+    await this.deleteKeysByPrefix("session:");
+    await this.deleteKeysByPrefix("evaluation:");
+  }
+
   async cacheGet(key) {
     try {
       const raw = await this.redis.get(key);
@@ -625,6 +666,10 @@ export class PostgresStore {
   async saveVocabulary(input) {
     const id = randomUUID();
     const ts = nowIso();
+    const userId = input.userId;
+    if (!userId) {
+      throw new Error("userId is required");
+    }
 
     const client = await this.pool.connect();
 
@@ -650,7 +695,7 @@ export class PostgresStore {
         `,
         [
           id,
-          input.userId || "default-user",
+          userId,
           input.text,
           input.definition,
           input.example || "",
@@ -680,7 +725,7 @@ export class PostgresStore {
 
       await client.query("COMMIT");
 
-      await this.cacheDel(reviewSessionCacheKey(input.userId || "default-user"));
+      await this.cacheDel(reviewSessionCacheKey(userId));
 
       const merged = {
         ...vocabResult.rows[0],

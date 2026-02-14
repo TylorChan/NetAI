@@ -17,6 +17,7 @@ export function readRuntimeConfig() {
     workerUrl: readRequiredEnv("WORKER_URL"),
     databaseUrl: readRequiredEnv("DATABASE_URL"),
     redisUrl: readRequiredEnv("REDIS_URL"),
+    jwtSecret: readRequiredEnv("GRAPHQL_JWT_SECRET"),
     graphqlMaxDepth: Number(process.env.GRAPHQL_MAX_DEPTH || 8),
     graphqlRateLimitWindowMs: Number(process.env.GRAPHQL_RATE_LIMIT_WINDOW_MS || 60_000),
     graphqlRateLimitMax: Number(process.env.GRAPHQL_RATE_LIMIT_MAX || 120)

@@ -1,10 +1,12 @@
 FROM node:24-slim
 WORKDIR /app
 
-COPY apps/worker/package.json ./package.json
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+COPY apps/worker/package.json apps/worker/package.json
+RUN npm ci --omit=dev --workspace @netai/worker
 
-COPY apps/worker/src ./src
+COPY apps/worker/src apps/worker/src
+WORKDIR /app/apps/worker
 
 ENV NODE_ENV=production
 ENV PORT=8080

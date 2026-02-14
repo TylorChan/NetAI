@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 const startNetworkingSessionInputSchema = z.object({
-  userId: z.string().min(1),
   goal: z.string().min(1),
   targetProfileContext: z.string().optional().default(""),
   customContext: z.string().optional().default("")
@@ -42,8 +41,7 @@ const vocabularyInputSchema = z.object({
   exampleTrans: z.string().optional(),
   realLifeDef: z.string().optional(),
   surroundingText: z.string().optional(),
-  videoTitle: z.string().optional(),
-  userId: z.string().optional().default("default-user")
+  videoTitle: z.string().optional()
 });
 
 const cardUpdateSchema = z.object({
@@ -57,35 +55,93 @@ const cardUpdateSchema = z.object({
 });
 
 export function createResolvers({ store, evaluationService, followupEmailService, logger }) {
+  function requireUser(context) {
+    if (!context?.user?.id) {
+      const error = new Error("UNAUTHENTICATED");
+      error.code = "UNAUTHENTICATED";
+      throw error;
+    }
+    return context.user;
+  }
+
+  async function requireOwnedSession({ sessionId, context }) {
+    const user = requireUser(context);
+    const session = await store.getSession(sessionId);
+    if (!session) {
+      throw new Error("session not found");
+    }
+    if (session.userId !== user.id) {
+      const error = new Error("FORBIDDEN");
+      error.code = "FORBIDDEN";
+      throw error;
+    }
+    return session;
+  }
+
   return {
     Query: {
       ping: () => "pong",
-      session: async (_, { id }, context) => context.loaders.sessionById.load(id),
-      sessions: async (_, { userId }) => store.listSessionsForUser(userId),
-      getSessionResume: async (_, { sessionId }) => store.getSessionResume(sessionId),
-      getSessionEvaluation: async (_, { sessionId }, context) =>
-        context.loaders.evaluationBySessionId.load(sessionId)
+      me: async (_parent, _args, context) => {
+        const user = context?.user;
+        if (!user?.id) return null;
+        const row = await store.getUserById(user.id);
+        if (!row) return null;
+        return {
+          id: row.id,
+          email: row.email,
+          name: row.name,
+          createdAt:
+            typeof row.created_at === "string"
+              ? row.created_at
+              : new Date(row.created_at).toISOString()
+        };
+      },
+      sessions: async (_parent, _args, context) => {
+        const user = requireUser(context);
+        return store.listSessionsForUser(user.id);
+      },
+      session: async (_parent, { id }, context) => {
+        await requireOwnedSession({ sessionId: id, context });
+        return context.loaders.sessionById.load(id);
+      },
+      getSessionResume: async (_parent, { sessionId }, context) => {
+        await requireOwnedSession({ sessionId, context });
+        return store.getSessionResume(sessionId);
+      },
+      getSessionEvaluation: async (_parent, { sessionId }, context) => {
+        await requireOwnedSession({ sessionId, context });
+        return context.loaders.evaluationBySessionId.load(sessionId);
+      }
     },
     Mutation: {
-      startNetworkingSession: async (_, { input }) => {
+      startNetworkingSession: async (_parent, { input }, context) => {
+        const user = requireUser(context);
         const parsed = startNetworkingSessionInputSchema.parse(input);
-        return store.createSession(parsed);
+        return store.createSession({
+          userId: user.id,
+          goal: parsed.goal,
+          targetProfileContext: parsed.targetProfileContext,
+          customContext: parsed.customContext
+        });
       },
-      renameSession: async (_, { input }) => {
+      renameSession: async (_parent, { input }, context) => {
+        await requireOwnedSession({ sessionId: input?.sessionId, context });
         const parsed = renameSessionInputSchema.parse(input);
         return store.renameSession({
           sessionId: parsed.sessionId,
           goal: parsed.goal.trim()
         });
       },
-      deleteSession: async (_, { sessionId }) => {
+      deleteSession: async (_parent, { sessionId }, context) => {
         if (!sessionId?.trim()) {
           throw new Error("sessionId is required");
         }
 
+        await requireOwnedSession({ sessionId: sessionId.trim(), context });
         return store.deleteSession(sessionId.trim());
       },
-      requestStageTransition: async (_, { input }) => {
+      requestStageTransition: async (_parent, { input }, context) => {
+        await requireOwnedSession({ sessionId: input?.sessionId, context });
         const parsed = requestStageTransitionInputSchema.parse(input);
         return store.requestStageTransition({
           sessionId: parsed.sessionId,
@@ -94,15 +150,17 @@ export function createResolvers({ store, evaluationService, followupEmailService
           reason: parsed.reason.trim()
         });
       },
-      appendSessionTurn: async (_, { input }) => {
+      appendSessionTurn: async (_parent, { input }, context) => {
+        await requireOwnedSession({ sessionId: input?.sessionId, context });
         const parsed = appendSessionTurnInputSchema.parse(input);
         return store.appendTurn(parsed);
       },
-      finalizeNetworkingSession: async (_, { sessionId }) => {
+      finalizeNetworkingSession: async (_parent, { sessionId }, context) => {
         if (!sessionId) {
           throw new Error("sessionId is required");
         }
 
+        await requireOwnedSession({ sessionId, context });
         const session = await store.finalizeSession(sessionId);
         await evaluationService.queueEvaluation(sessionId);
 
@@ -112,22 +170,22 @@ export function createResolvers({ store, evaluationService, followupEmailService
           message: "Evaluation queued"
         };
       },
-      generateFollowupEmail: async (_, { input }) => {
+      generateFollowupEmail: async (_parent, { input }, context) => {
+        await requireOwnedSession({ sessionId: input?.sessionId, context });
         const parsed = generateFollowupEmailInputSchema.parse(input);
         return followupEmailService.generate(parsed);
       },
-      saveVocabulary: async (_, { input }) => {
+      saveVocabulary: async (_parent, { input }, context) => {
+        const user = requireUser(context);
         const parsed = vocabularyInputSchema.parse(input);
-        return store.saveVocabulary(parsed);
+        return store.saveVocabulary({ ...parsed, userId: user.id });
       },
-      startReviewSession: async (_, { userId }) => {
-        if (!userId) {
-          throw new Error("userId is required");
-        }
-
-        return store.startReviewSession(userId);
+      startReviewSession: async (_parent, _args, context) => {
+        const user = requireUser(context);
+        return store.startReviewSession(user.id);
       },
-      saveReviewSession: async (_, { updates }) => {
+      saveReviewSession: async (_parent, { updates }, context) => {
+        requireUser(context);
         const parsed = z.array(cardUpdateSchema).parse(updates);
         return store.saveReviewSession(parsed);
       }
