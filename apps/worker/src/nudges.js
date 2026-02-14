@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
 
 const NudgesSchema = z.object({
-  nudges: z.array(z.string()).min(1).max(3)
+  nudges: z.array(z.string()).min(2).max(2)
 });
 
 function formatTurns(turns) {
@@ -26,12 +26,13 @@ function buildPrompt({ session, conversationSummary, recentTurns }) {
   return [
     "You write ultra-short 'what to say next' nudges for a live networking conversation.",
     "The user is speaking to a real person (you) in a realistic networking chat.",
-    "Generate 1-3 options the user can say next.",
+    "Generate exactly 2 options the user can say next.",
     "",
     "Hard rules:",
     "- Each nudge must be 5-12 words.",
     "- Write in the user's voice (first-person).",
     "- At least 1 nudge must be a question.",
+    "- Return exactly 2 nudges.",
     "- Must be directly grounded in provided context; do not invent facts.",
     "- Do not mention AI, practice, scoring, stages, or 'transcript'.",
     "",
@@ -42,7 +43,7 @@ function buildPrompt({ session, conversationSummary, recentTurns }) {
     conversationSummary ? `Rolling summary:\n${conversationSummary}` : "",
     transcript ? `Recent turns:\n${transcript}` : "Recent turns: (none)",
     "",
-    "Return only JSON: {\"nudges\": [\"...\", \"...\", \"...\"]}"
+    "Return only JSON: {\"nudges\": [\"...\", \"...\"]}"
   ].join("\n");
 }
 
@@ -76,6 +77,6 @@ export async function generateNudges({ session, conversationSummary, recentTurns
 
   const parsed = NudgesSchema.parse(result);
   return {
-    nudges: parsed.nudges.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3)
+    nudges: parsed.nudges.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 2)
   };
 }

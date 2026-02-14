@@ -13,7 +13,7 @@ function normalizeNudges(raw) {
   return nudges
     .map((item) => String(item || "").trim())
     .filter(Boolean)
-    .slice(0, 3);
+    .slice(0, 2);
 }
 
 async function computeNudges({ store, workerUrl, sessionId, logger }) {
@@ -89,4 +89,3 @@ export function createNudgeService({ store, workerUrl, logger }) {
     refreshNudgesNow
   };
 }
-

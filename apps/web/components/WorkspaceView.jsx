@@ -677,7 +677,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const stageState = resume?.session?.stageState || "SMALL_TALK";
   const stageSuggestions = STAGE_SUGGESTIONS[stageState] || STAGE_SUGGESTIONS.SMALL_TALK;
   const currentStageIndex = Math.max(STAGE_SEQUENCE.indexOf(stageState), 0);
-  const talkNudges = (resume?.talkNudges || resume?.session?.talkNudges || []).filter(Boolean).slice(0, 3);
+  const talkNudges = (resume?.talkNudges || resume?.session?.talkNudges || []).filter(Boolean).slice(0, 2);
   const openMenuSession = openSessionMenuId
     ? sessions.find((session) => session.id === openSessionMenuId)
     : null;

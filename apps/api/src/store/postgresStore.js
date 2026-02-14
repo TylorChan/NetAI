@@ -263,7 +263,7 @@ export class PostgresStore {
 
   async saveTalkNudges({ sessionId, nudges }) {
     const cleaned = Array.isArray(nudges)
-      ? nudges.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3)
+      ? nudges.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 2)
       : [];
 
     const result = await this.pool.query(
