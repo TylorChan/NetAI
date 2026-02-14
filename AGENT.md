@@ -195,3 +195,10 @@
 - API：每次 `appendSessionTurn` 写入 turn 后，异步触发 summary 更新（Redis `SET NX` 防抖，避免每一句都调用 LLM）。
 - Worker：新增 `POST /tasks/summarize`，用 `SUMMARY_MODEL`（默认 `gpt-5-mini`）对“priorSummary + 增量 turns”生成 <=10 bullets 的滚动摘要。
 - Web：`getSessionResume` 现在返回 `conversationSummary`，Realtime 连接时把它注入 agent instructions（再配合 recent turns seed），从而 reconnect 能自然接着上次聊。
+
+## Live Talk Nudges + Session Metadata (2026-02-14)
+为提升产品感与实时引导，我们增加了 “Live nudges + session 侧栏标题/goal 摘要”：
+- Worker：新增 `/tasks/nudges`（默认 `NUDGE_MODEL=gpt-5-nano`）生成 1-3 条超短可复述的下一句提示。
+- API：每次 `appendSessionTurn` 后异步刷新 nudges（Redis 防抖），写入 `sessions.talk_nudges`。
+- Worker：新增 `/tasks/session_metadata`（默认 `SESSION_METADATA_MODEL=gpt-5-nano`）生成 `displayTitle`（侧栏标题）和 `goalSummary`（stage 下的 goal 行）。
+- Web：Connect Agent 按钮旁增加红/绿连接指示点；侧栏标题限制两行且高度一致；stage 下展示 `Goal:` 的 nano 摘要。

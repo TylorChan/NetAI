@@ -30,6 +30,14 @@ ALTER TABLE sessions
   ADD COLUMN IF NOT EXISTS summary_cursor_at TIMESTAMPTZ;
 ALTER TABLE sessions
   ADD COLUMN IF NOT EXISTS summary_updated_at TIMESTAMPTZ;
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS display_title TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS goal_summary TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS talk_nudges JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS nudges_updated_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_updated
   ON sessions (user_id, updated_at DESC);

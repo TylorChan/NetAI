@@ -10,10 +10,13 @@ export const typeDefs = /* GraphQL */ `
     id: ID!
     userId: String!
     goal: String!
+    displayTitle: String!
+    goalSummary: String!
     status: String!
     targetProfileContext: String
     customContext: String
     stageState: String!
+    talkNudges: [String!]!
     createdAt: String!
     updatedAt: String!
     endedAt: String
@@ -42,6 +45,7 @@ export const typeDefs = /* GraphQL */ `
     recentTurns: [SessionTurn!]!
     contextSummary: String!
     conversationSummary: String!
+    talkNudges: [String!]!
     stageHint: String!
   }
 

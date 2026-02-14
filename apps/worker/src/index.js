@@ -2,6 +2,8 @@ import "dotenv/config";
 import express from "express";
 import { evaluateConversation } from "./evaluate.js";
 import { summarizeConversation } from "./summarize.js";
+import { generateNudges } from "./nudges.js";
+import { generateSessionMetadata } from "./sessionMetadata.js";
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error("OPENAI_API_KEY is required for worker startup");
@@ -46,6 +48,47 @@ app.post("/tasks/summarize", async (req, res) => {
       session,
       priorSummary: String(priorSummary || ""),
       newTurns,
+      apiKey: process.env.OPENAI_API_KEY
+    });
+
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/tasks/nudges", async (req, res) => {
+  try {
+    const { session, conversationSummary, recentTurns } = req.body || {};
+
+    if (!session) {
+      return res.status(400).json({ error: "session is required" });
+    }
+
+    const payload = await generateNudges({
+      session,
+      conversationSummary: String(conversationSummary || ""),
+      recentTurns: Array.isArray(recentTurns) ? recentTurns : [],
+      apiKey: process.env.OPENAI_API_KEY
+    });
+
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/tasks/session_metadata", async (req, res) => {
+  try {
+    const { goal, targetProfileContext, customContext } = req.body || {};
+    if (!goal) {
+      return res.status(400).json({ error: "goal is required" });
+    }
+
+    const payload = await generateSessionMetadata({
+      goal,
+      targetProfileContext: String(targetProfileContext || ""),
+      customContext: String(customContext || ""),
       apiKey: process.env.OPENAI_API_KEY
     });
 

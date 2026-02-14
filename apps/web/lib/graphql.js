@@ -27,6 +27,8 @@ export const mutations = {
         id
         userId
         goal
+        displayTitle
+        goalSummary
         status
         targetProfileContext
         customContext
@@ -39,6 +41,8 @@ export const mutations = {
       renameSession(input: $input) {
         id
         goal
+        displayTitle
+        goalSummary
         updatedAt
       }
     }
@@ -115,11 +119,14 @@ export const queries = {
       getSessionResume(sessionId: $sessionId) {
         contextSummary
         conversationSummary
+        talkNudges
         stageHint
         session {
           id
           userId
           goal
+          displayTitle
+          goalSummary
           status
           stageState
           targetProfileContext
@@ -127,6 +134,7 @@ export const queries = {
           createdAt
           updatedAt
           endedAt
+          talkNudges
         }
         recentTurns {
           id
@@ -156,6 +164,7 @@ export const queries = {
       sessions {
         id
         goal
+        displayTitle
         status
         stageState
         updatedAt

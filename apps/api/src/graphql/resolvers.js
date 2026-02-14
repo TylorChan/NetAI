@@ -54,7 +54,15 @@ const cardUpdateSchema = z.object({
   reps: z.number().int().optional()
 });
 
-export function createResolvers({ store, evaluationService, followupEmailService, summaryService, logger }) {
+export function createResolvers({
+  store,
+  evaluationService,
+  followupEmailService,
+  summaryService,
+  nudgeService,
+  sessionMetadataService,
+  logger
+}) {
   function requireUser(context) {
     if (!context?.user?.id) {
       const error = new Error("UNAUTHENTICATED");
@@ -117,20 +125,27 @@ export function createResolvers({ store, evaluationService, followupEmailService
       startNetworkingSession: async (_parent, { input }, context) => {
         const user = requireUser(context);
         const parsed = startNetworkingSessionInputSchema.parse(input);
-        return store.createSession({
+        const session = await store.createSession({
           userId: user.id,
           goal: parsed.goal,
           targetProfileContext: parsed.targetProfileContext,
           customContext: parsed.customContext
         });
+
+        await sessionMetadataService?.ensureMetadata?.(session.id);
+        await nudgeService?.refreshNudgesNow?.(session.id);
+        return store.getSession(session.id);
       },
       renameSession: async (_parent, { input }, context) => {
         await requireOwnedSession({ sessionId: input?.sessionId, context });
         const parsed = renameSessionInputSchema.parse(input);
-        return store.renameSession({
+        const session = await store.renameSession({
           sessionId: parsed.sessionId,
           goal: parsed.goal.trim()
         });
+
+        await sessionMetadataService?.ensureMetadata?.(session.id);
+        return store.getSession(session.id);
       },
       deleteSession: async (_parent, { sessionId }, context) => {
         if (!sessionId?.trim()) {
@@ -155,6 +170,9 @@ export function createResolvers({ store, evaluationService, followupEmailService
         const parsed = appendSessionTurnInputSchema.parse(input);
         const turn = await store.appendTurn(parsed);
         summaryService?.queueSummary?.(parsed.sessionId);
+        if (parsed.role === "assistant") {
+          nudgeService?.queueNudges?.(parsed.sessionId);
+        }
         return turn;
       },
       finalizeNetworkingSession: async (_parent, { sessionId }, context) => {

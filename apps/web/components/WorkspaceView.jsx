@@ -201,6 +201,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const newSessionTimerRef = useRef(null);
   const composerCloseTimerRef = useRef(null);
   const sessionLoaderTimerRef = useRef(null);
+  const resumeRefreshTimerRef = useRef(null);
   const chatPrimaryRef = useRef(null);
   const scorePanelRef = useRef(null);
   const openedEvaluationKeyRef = useRef("");
@@ -408,6 +409,18 @@ export default function WorkspaceView({ initialSessionId = null }) {
         persistPromise
           .then(() => loadResume(activeSessionId))
           .catch(() => {});
+      } else if (normalizedRole === "assistant") {
+        const sessionIdSnapshot = activeSessionId;
+        persistPromise
+          .then(() => {
+            if (resumeRefreshTimerRef.current) {
+              clearTimeout(resumeRefreshTimerRef.current);
+            }
+            resumeRefreshTimerRef.current = setTimeout(() => {
+              loadResume(sessionIdSnapshot).catch(() => {});
+            }, 260);
+          })
+          .catch(() => {});
       }
     },
     [activeSessionId, appendTurnLocal, loadResume, persistTurn]
@@ -441,6 +454,9 @@ export default function WorkspaceView({ initialSessionId = null }) {
       }
       if (sessionLoaderTimerRef.current) {
         clearTimeout(sessionLoaderTimerRef.current);
+      }
+      if (resumeRefreshTimerRef.current) {
+        clearTimeout(resumeRefreshTimerRef.current);
       }
     };
   }, []);
@@ -661,6 +677,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const stageState = resume?.session?.stageState || "SMALL_TALK";
   const stageSuggestions = STAGE_SUGGESTIONS[stageState] || STAGE_SUGGESTIONS.SMALL_TALK;
   const currentStageIndex = Math.max(STAGE_SEQUENCE.indexOf(stageState), 0);
+  const talkNudges = (resume?.talkNudges || resume?.session?.talkNudges || []).filter(Boolean).slice(0, 3);
   const openMenuSession = openSessionMenuId
     ? sessions.find((session) => session.id === openSessionMenuId)
     : null;
@@ -874,7 +891,13 @@ export default function WorkspaceView({ initialSessionId = null }) {
       setSessions((prev) =>
         prev.map((session) =>
           session.id === renamed.id
-            ? { ...session, goal: renamed.goal, updatedAt: renamed.updatedAt }
+            ? {
+                ...session,
+                goal: renamed.goal,
+                displayTitle: renamed.displayTitle,
+                goalSummary: renamed.goalSummary,
+                updatedAt: renamed.updatedAt
+              }
             : session
         )
       );
@@ -885,6 +908,8 @@ export default function WorkspaceView({ initialSessionId = null }) {
               session: {
                 ...prev.session,
                 goal: renamed.goal,
+                displayTitle: renamed.displayTitle,
+                goalSummary: renamed.goalSummary,
                 updatedAt: renamed.updatedAt
               }
             }
@@ -1023,7 +1048,9 @@ export default function WorkspaceView({ initialSessionId = null }) {
                 onClick={() => handleSessionClick(session.id)}
                 disabled={!isAuthed}
               >
-                <strong>{session.goal}</strong>
+                <strong className="session-title" title={session.goal}>
+                  {session.displayTitle || session.goal}
+                </strong>
                 <span>{session.status}</span>
                 <small>{new Date(session.updatedAt).toLocaleString()}</small>
               </button>
@@ -1162,6 +1189,10 @@ export default function WorkspaceView({ initialSessionId = null }) {
                           disabled={realtimeStatus === "CONNECTING"}
                         >
                           {realtimeStatus === "CONNECTING" ? <LoadingSpinner /> : null}
+                          <span
+                            className={`connect-dot ${realtimeStatus === "CONNECTED" ? "on" : ""}`}
+                            aria-hidden="true"
+                          />
                           <span>{realtimeStatus === "CONNECTING" ? "Connecting..." : "Connect Agent"}</span>
                         </button>
                       )}
@@ -1215,27 +1246,42 @@ export default function WorkspaceView({ initialSessionId = null }) {
                             <strong>{formatStage(stageState)}:</strong>{" "}
                             {resume?.stageHint || "Loading stage guidance..."}
                           </p>
+                          <p className="muted stage-goal">
+                            <strong>Goal:</strong>{" "}
+                            {resume?.session?.goalSummary || resume?.session?.goal || "Set a clear goal for this chat."}
+                          </p>
                         </div>
 
                         <div className="stage-right">
                           <p className="muted"><strong>Talking Suggestions</strong></p>
-                          <div className="stage-tips-grid">
-                            {stageSuggestions.map((tip, index) => (
-                              <article
-                                key={`${stageState}-${tip.id}`}
-                                className="tip-card"
-                                style={{ "--tip-delay": `${index * 80}ms` }}
-                              >
-                                <span className={`tip-icon tip-icon-${tip.icon}`}>
-                                  <TipIcon type={tip.icon} />
-                                </span>
-                                <div className="tip-copy">
-                                  <h4>{tip.title}</h4>
-                                  <p>{tip.detail}</p>
-                                </div>
-                              </article>
-                            ))}
-                          </div>
+                          {talkNudges.length ? (
+                            <div className="talk-nudges" aria-live="polite">
+                              {talkNudges.map((nudge) => (
+                                <p key={nudge} className="talk-nudge">
+                                  {nudge}
+                                </p>
+                              ))}
+                            </div>
+                          ) : null}
+                          {!talkNudges.length ? (
+                            <div className="stage-tips-grid">
+                              {stageSuggestions.map((tip, index) => (
+                                <article
+                                  key={`${stageState}-${tip.id}`}
+                                  className="tip-card"
+                                  style={{ "--tip-delay": `${index * 80}ms` }}
+                                >
+                                  <span className={`tip-icon tip-icon-${tip.icon}`}>
+                                    <TipIcon type={tip.icon} />
+                                  </span>
+                                  <div className="tip-copy">
+                                    <h4>{tip.title}</h4>
+                                    <p>{tip.detail}</p>
+                                  </div>
+                                </article>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 

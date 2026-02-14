@@ -243,6 +243,15 @@ body.session-mode .shell {
   font-size: 14px;
 }
 
+.session-list-main strong.session-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.2;
+  min-height: calc(1.2em * 2);
+}
+
 .session-list-main span {
   font-size: 12px;
   color: #94a3b8;
@@ -317,6 +326,20 @@ body.session-mode .shell {
   display: grid;
   gap: 2px;
   z-index: 120;
+}
+
+.connect-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
+  flex: 0 0 auto;
+}
+
+.connect-dot.on {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18);
 }
 
 .session-global-menu.up {
@@ -681,6 +704,27 @@ body.session-mode .shell {
 
 .stage-right .muted {
   margin: 0 0 6px;
+}
+
+.stage-goal {
+  margin: 6px 0 0;
+}
+
+.talk-nudges {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.talk-nudge {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #ffffff;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #344054;
 }
 
 .score-collapse-wrap {

@@ -32,17 +32,35 @@ function mapSession(row) {
     return null;
   }
 
+  let talkNudges = [];
+  if (Array.isArray(row.talk_nudges)) {
+    talkNudges = row.talk_nudges;
+  } else if (typeof row.talk_nudges === "string") {
+    try {
+      const parsed = JSON.parse(row.talk_nudges);
+      if (Array.isArray(parsed)) {
+        talkNudges = parsed;
+      }
+    } catch {
+      talkNudges = [];
+    }
+  }
+
   return {
     id: row.id,
     userId: row.user_id,
     goal: row.goal,
+    displayTitle: row.display_title || "",
+    goalSummary: row.goal_summary || "",
     status: row.status,
     targetProfileContext: row.target_profile_context,
     customContext: row.custom_context,
     stageState: normalizeStage(row.stage_state),
     conversationSummary: row.conversation_summary || "",
+    talkNudges,
     summaryCursorAt: toIso(row.summary_cursor_at),
     summaryUpdatedAt: toIso(row.summary_updated_at),
+    nudgesUpdatedAt: toIso(row.nudges_updated_at),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
     endedAt: toIso(row.ended_at)
@@ -118,6 +136,10 @@ function summaryPendingKey(sessionId) {
   return `summary:pending:${sessionId}`;
 }
 
+function nudgesPendingKey(sessionId) {
+  return `nudges:pending:${sessionId}`;
+}
+
 export class PostgresStore {
   constructor({ pool, redis, logger }) {
     this.pool = pool;
@@ -141,6 +163,25 @@ export class PostgresStore {
       await this.redis.del(summaryPendingKey(sessionId));
     } catch (error) {
       this.logger?.warn("summary pending clear failed", { sessionId, error: error.message });
+    }
+  }
+
+  async tryMarkNudgesPending(sessionId, ttlSeconds = 10) {
+    try {
+      const key = nudgesPendingKey(sessionId);
+      const result = await this.redis.set(key, "1", "EX", ttlSeconds, "NX");
+      return result === "OK";
+    } catch (error) {
+      this.logger?.warn("nudges pending mark failed", { sessionId, error: error.message });
+      return true;
+    }
+  }
+
+  async clearNudgesPending(sessionId) {
+    try {
+      await this.redis.del(nudgesPendingKey(sessionId));
+    } catch (error) {
+      this.logger?.warn("nudges pending clear failed", { sessionId, error: error.message });
     }
   }
 
@@ -192,6 +233,50 @@ export class PostgresStore {
       RETURNING user_id
       `,
       [sessionId, summary || "", cursorAt || null]
+    );
+
+    if (result.rows?.length) {
+      const userId = result.rows[0].user_id;
+      await this.cacheDel(sessionCacheKey(sessionId), sessionsListCacheKey(userId));
+    }
+  }
+
+  async saveSessionMetadata({ sessionId, displayTitle, goalSummary }) {
+    const result = await this.pool.query(
+      `
+      UPDATE sessions
+      SET
+        display_title = $2,
+        goal_summary = $3,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING user_id
+      `,
+      [sessionId, String(displayTitle || "").trim(), String(goalSummary || "").trim()]
+    );
+
+    if (result.rows?.length) {
+      const userId = result.rows[0].user_id;
+      await this.cacheDel(sessionCacheKey(sessionId), sessionsListCacheKey(userId));
+    }
+  }
+
+  async saveTalkNudges({ sessionId, nudges }) {
+    const cleaned = Array.isArray(nudges)
+      ? nudges.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3)
+      : [];
+
+    const result = await this.pool.query(
+      `
+      UPDATE sessions
+      SET
+        talk_nudges = $2::jsonb,
+        nudges_updated_at = NOW(),
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING user_id
+      `,
+      [sessionId, JSON.stringify(cleaned)]
     );
 
     if (result.rows?.length) {
@@ -598,6 +683,7 @@ export class PostgresStore {
         session.targetProfileContext ||
         "Default networking context",
       conversationSummary: session.conversationSummary || "",
+      talkNudges: session.talkNudges || [],
       stageHint: getStageHint(session.stageState)
     };
   }

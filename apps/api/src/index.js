@@ -16,6 +16,8 @@ import { createRealtimeSession } from "./services/realtimeSessionService.js";
 import { createEvaluationService } from "./services/evaluationService.js";
 import { createFollowupEmailService } from "./services/followupEmailService.js";
 import { createSummaryService } from "./services/summaryService.js";
+import { createNudgeService } from "./services/nudgeService.js";
+import { createSessionMetadataService } from "./services/sessionMetadataService.js";
 import { PostgresStore } from "./store/postgresStore.js";
 import { createLogger } from "./utils/logger.js";
 import { readRuntimeConfig } from "./db/env.js";
@@ -60,6 +62,16 @@ async function bootstrap() {
     workerUrl: config.workerUrl,
     logger
   });
+  const nudgeService = createNudgeService({
+    store,
+    workerUrl: config.workerUrl,
+    logger
+  });
+  const sessionMetadataService = createSessionMetadataService({
+    store,
+    workerUrl: config.workerUrl,
+    logger
+  });
   const followupEmailService = createFollowupEmailService({
     store,
     openAiApiKey: config.openAiApiKey,
@@ -73,6 +85,8 @@ async function bootstrap() {
       evaluationService,
       followupEmailService,
       summaryService,
+      nudgeService,
+      sessionMetadataService,
       logger
     })
   });
