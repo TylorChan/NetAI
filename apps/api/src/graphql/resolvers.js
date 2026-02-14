@@ -54,7 +54,7 @@ const cardUpdateSchema = z.object({
   reps: z.number().int().optional()
 });
 
-export function createResolvers({ store, evaluationService, followupEmailService, logger }) {
+export function createResolvers({ store, evaluationService, followupEmailService, summaryService, logger }) {
   function requireUser(context) {
     if (!context?.user?.id) {
       const error = new Error("UNAUTHENTICATED");
@@ -153,7 +153,9 @@ export function createResolvers({ store, evaluationService, followupEmailService
       appendSessionTurn: async (_parent, { input }, context) => {
         await requireOwnedSession({ sessionId: input?.sessionId, context });
         const parsed = appendSessionTurnInputSchema.parse(input);
-        return store.appendTurn(parsed);
+        const turn = await store.appendTurn(parsed);
+        summaryService?.queueSummary?.(parsed.sessionId);
+        return turn;
       },
       finalizeNetworkingSession: async (_parent, { sessionId }, context) => {
         if (!sessionId) {

@@ -417,6 +417,8 @@ export default function WorkspaceView({ initialSessionId = null }) {
     sessionId: activeSessionId,
     stageState: resume?.session?.stageState,
     contextSummary: resume?.contextSummary,
+    conversationSummary: resume?.conversationSummary,
+    historySeedTurns: resume?.recentTurns,
     onTranscriptEvent: handleTranscriptEvent,
     onStageTransition: () => {
       if (activeSessionId) {

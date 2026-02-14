@@ -114,6 +114,7 @@ export const queries = {
     query GetSessionResume($sessionId: ID!) {
       getSessionResume(sessionId: $sessionId) {
         contextSummary
+        conversationSummary
         stageHint
         session {
           id

@@ -188,3 +188,10 @@
 - Vercel project 创建与 env 配置
 - GCP project/billing 与 Cloud APIs 开启
 - 生产密钥注入（Secret Manager）
+
+## Rolling Summary + Resume (2026-02-14)
+为了解决「重新 Connect agent 会变成新对话」的问题，我们按行业 best practice 做了“可恢复对话”的服务端滚动摘要：
+- DB：`sessions` 增加 `conversation_summary`, `summary_cursor_at`, `summary_updated_at`（通过 `ALTER TABLE ... IF NOT EXISTS` 轻量迁移）。
+- API：每次 `appendSessionTurn` 写入 turn 后，异步触发 summary 更新（Redis `SET NX` 防抖，避免每一句都调用 LLM）。
+- Worker：新增 `POST /tasks/summarize`，用 `SUMMARY_MODEL`（默认 `gpt-5-mini`）对“priorSummary + 增量 turns”生成 <=10 bullets 的滚动摘要。
+- Web：`getSessionResume` 现在返回 `conversationSummary`，Realtime 连接时把它注入 agent instructions（再配合 recent turns seed），从而 reconnect 能自然接着上次聊。

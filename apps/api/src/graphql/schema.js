@@ -41,6 +41,7 @@ export const typeDefs = /* GraphQL */ `
     session: Session!
     recentTurns: [SessionTurn!]!
     contextSummary: String!
+    conversationSummary: String!
     stageHint: String!
   }
 
@@ -169,4 +170,3 @@ export const typeDefs = /* GraphQL */ `
     saveReviewSession(updates: [CardUpdateInput!]!): SaveReviewSessionPayload!
   }
 `;
-

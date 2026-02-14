@@ -72,15 +72,36 @@ function parseEphemeralToken(payload) {
   return null;
 }
 
-function buildInstructions({ stageState, contextSummary }) {
+function formatSeedTranscriptForPrompt(history) {
+  const items = Array.isArray(history) ? history : [];
+  const lines = [];
+
+  for (const item of items) {
+    if (!item || item.type !== "message") continue;
+    if (item.role !== "user" && item.role !== "assistant") continue;
+    const text = extractMessageText(item.content || []);
+    if (!text) continue;
+    lines.push(`${item.role === "user" ? "User" : "Assistant"}: ${text.replaceAll("\n", " ")}`);
+  }
+
+  return lines.slice(-14).join("\n");
+}
+
+function buildInstructions({ stageState, contextSummary, conversationSummary, history }) {
   const stage = normalizeStage(stageState);
   const stageDirective = STAGE_PROMPTS[stage];
   const context = contextSummary || "Default networking context.";
+  const rolling = String(conversationSummary || "").trim();
+  const transcript = formatSeedTranscriptForPrompt(history);
 
   return [
     "You are NetAI, a networking voice coach for realistic practice.",
     `Current stage: ${stage}. ${stageDirective}`,
     `Session context: ${context}`,
+    rolling ? `Rolling conversation summary:\n${rolling}` : "",
+    transcript
+      ? `You are resuming an existing conversation. Use this recent transcript to continue naturally (do not restart):\n${transcript}`
+      : "If this is a new session, start with a warm, natural opener.",
     "Respond conversationally in spoken style and ask one focused question per turn.",
     "Keep each response under 3 sentences and prioritize natural back-and-forth.",
     "Stage transitions are backend-controlled.",
@@ -183,7 +204,9 @@ function createNetworkingCoachAgent({ pushEvent, onStageTransition }) {
     instructions: (runContext) =>
       buildInstructions({
         stageState: runContext?.context?.stageState,
-        contextSummary: runContext?.context?.contextSummary
+        contextSummary: runContext?.context?.contextSummary,
+        conversationSummary: runContext?.context?.conversationSummary,
+        history: runContext?.context?.history
       })
   });
 }
@@ -192,6 +215,8 @@ export function useRealtimeSession({
   sessionId,
   stageState,
   contextSummary,
+  conversationSummary,
+  historySeedTurns,
   onTranscriptEvent,
   onStageTransition
 }) {
@@ -205,8 +230,47 @@ export function useRealtimeSession({
   const seenTranscriptRef = useRef(new Set());
   const appliedContextRef = useRef({
     stageState: "SMALL_TALK",
-    contextSummary: "Default networking context."
+    contextSummary: "Default networking context.",
+    conversationSummary: ""
   });
+  const historySeedRef = useRef([]);
+
+  useEffect(() => {
+    historySeedRef.current = Array.isArray(historySeedTurns) ? historySeedTurns : [];
+  }, [historySeedTurns]);
+
+  const hydrateLocalHistory = useCallback((session) => {
+    const turns = historySeedRef.current || [];
+    if (!turns.length) return;
+
+    const tail = turns
+      .filter((turn) => turn && (turn.role === "user" || turn.role === "assistant"))
+      .slice(-22);
+
+    let previousItemId = null;
+    const seeded = tail.map((turn, index) => {
+      const itemId = `seed-${turn.id || `${Date.now()}-${index}`}`;
+      const role = normalizeRole(turn.role);
+      const text = String(turn.content || "").trim();
+
+      const item = {
+        itemId,
+        previousItemId,
+        type: "message",
+        role,
+        status: "completed",
+        content:
+          role === "assistant"
+            ? [{ type: "output_text", text }]
+            : [{ type: "input_text", text }]
+      };
+
+      previousItemId = itemId;
+      return item;
+    });
+
+    session.updateHistory(seeded);
+  }, []);
 
   useEffect(() => {
     transcriptHandlerRef.current = onTranscriptEvent;
@@ -305,11 +369,13 @@ export function useRealtimeSession({
       const runtimeContext = {
         sessionId,
         stageState: normalizeStage(stageState),
-        contextSummary: contextSummary || "Default networking context."
+        contextSummary: contextSummary || "Default networking context.",
+        conversationSummary: String(conversationSummary || "").trim()
       };
       appliedContextRef.current = {
         stageState: runtimeContext.stageState,
-        contextSummary: runtimeContext.contextSummary
+        contextSummary: runtimeContext.contextSummary,
+        conversationSummary: runtimeContext.conversationSummary
       };
 
       const realtimeAgent = createNetworkingCoachAgent({
@@ -374,6 +440,10 @@ export function useRealtimeSession({
       seenTranscriptRef.current = new Set();
       await realtimeSession.connect({ apiKey: ephemeralToken });
 
+      // Seed recent transcript into local history so the agent can continue after reconnect.
+      hydrateLocalHistory(realtimeSession);
+      await realtimeSession.updateAgent(realtimeAgent);
+
       setStatus("CONNECTED");
       pushEvent("Realtime connected");
     } catch (error) {
@@ -381,7 +451,16 @@ export function useRealtimeSession({
       pushEvent(`Connect failed: ${error.message}`);
       disconnect();
     }
-  }, [contextSummary, disconnect, emitTranscript, pushEvent, sessionId, stageState]);
+  }, [
+    contextSummary,
+    conversationSummary,
+    disconnect,
+    emitTranscript,
+    hydrateLocalHistory,
+    pushEvent,
+    sessionId,
+    stageState
+  ]);
 
   useEffect(() => {
     if (status !== "CONNECTED" || !sessionRef.current) {
@@ -390,15 +469,21 @@ export function useRealtimeSession({
 
     const nextStage = normalizeStage(stageState);
     const nextContext = contextSummary || "Default networking context.";
+    const nextRolling = String(conversationSummary || "").trim();
     const currentApplied = appliedContextRef.current;
 
-    if (currentApplied.stageState === nextStage && currentApplied.contextSummary === nextContext) {
+    if (
+      currentApplied.stageState === nextStage &&
+      currentApplied.contextSummary === nextContext &&
+      currentApplied.conversationSummary === nextRolling
+    ) {
       return;
     }
 
     appliedContextRef.current = {
       stageState: nextStage,
-      contextSummary: nextContext
+      contextSummary: nextContext,
+      conversationSummary: nextRolling
     };
 
     if (!agentRef.current) {
@@ -407,10 +492,11 @@ export function useRealtimeSession({
 
     sessionRef.current.context.context.stageState = nextStage;
     sessionRef.current.context.context.contextSummary = nextContext;
+    sessionRef.current.context.context.conversationSummary = nextRolling;
     sessionRef.current.updateAgent(agentRef.current).catch((error) => {
       pushEvent(`Realtime context sync failed: ${error.message}`);
     });
-  }, [contextSummary, pushEvent, stageState, status]);
+  }, [contextSummary, conversationSummary, pushEvent, stageState, status]);
 
   useEffect(() => {
     return () => {

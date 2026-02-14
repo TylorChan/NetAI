@@ -40,6 +40,9 @@ function mapSession(row) {
     targetProfileContext: row.target_profile_context,
     customContext: row.custom_context,
     stageState: normalizeStage(row.stage_state),
+    conversationSummary: row.conversation_summary || "",
+    summaryCursorAt: toIso(row.summary_cursor_at),
+    summaryUpdatedAt: toIso(row.summary_updated_at),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
     endedAt: toIso(row.ended_at)
@@ -111,11 +114,90 @@ function reviewSessionCacheKey(userId) {
   return `review:due:${userId}`;
 }
 
+function summaryPendingKey(sessionId) {
+  return `summary:pending:${sessionId}`;
+}
+
 export class PostgresStore {
   constructor({ pool, redis, logger }) {
     this.pool = pool;
     this.redis = redis;
     this.logger = logger;
+  }
+
+  async tryMarkSummaryPending(sessionId, ttlSeconds = 25) {
+    try {
+      const key = summaryPendingKey(sessionId);
+      const result = await this.redis.set(key, "1", "EX", ttlSeconds, "NX");
+      return result === "OK";
+    } catch (error) {
+      this.logger?.warn("summary pending mark failed", { sessionId, error: error.message });
+      return true;
+    }
+  }
+
+  async clearSummaryPending(sessionId) {
+    try {
+      await this.redis.del(summaryPendingKey(sessionId));
+    } catch (error) {
+      this.logger?.warn("summary pending clear failed", { sessionId, error: error.message });
+    }
+  }
+
+  async listTurnsAfter(sessionId, afterIso, limit = 80) {
+    if (!afterIso) {
+      return [];
+    }
+
+    const result = await this.pool.query(
+      `
+      SELECT *
+      FROM session_turns
+      WHERE session_id = $1
+        AND created_at > $2::timestamptz
+      ORDER BY created_at ASC
+      LIMIT $3
+      `,
+      [sessionId, afterIso, limit]
+    );
+
+    return result.rows.map(mapTurn);
+  }
+
+  async listRecentTurns(sessionId, limit = 60) {
+    const result = await this.pool.query(
+      `
+      SELECT *
+      FROM session_turns
+      WHERE session_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2
+      `,
+      [sessionId, limit]
+    );
+
+    return result.rows.reverse().map(mapTurn);
+  }
+
+  async saveConversationSummary({ sessionId, summary, cursorAt }) {
+    const result = await this.pool.query(
+      `
+      UPDATE sessions
+      SET
+        conversation_summary = $2,
+        summary_cursor_at = $3::timestamptz,
+        summary_updated_at = NOW(),
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING user_id
+      `,
+      [sessionId, summary || "", cursorAt || null]
+    );
+
+    if (result.rows?.length) {
+      const userId = result.rows[0].user_id;
+      await this.cacheDel(sessionCacheKey(sessionId), sessionsListCacheKey(userId));
+    }
   }
 
   async countUsers() {
@@ -515,6 +597,7 @@ export class PostgresStore {
         session.customContext ||
         session.targetProfileContext ||
         "Default networking context",
+      conversationSummary: session.conversationSummary || "",
       stageHint: getStageHint(session.stageState)
     };
   }

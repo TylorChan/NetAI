@@ -15,6 +15,7 @@ import { createLoaders } from "./graphql/loaders.js";
 import { createRealtimeSession } from "./services/realtimeSessionService.js";
 import { createEvaluationService } from "./services/evaluationService.js";
 import { createFollowupEmailService } from "./services/followupEmailService.js";
+import { createSummaryService } from "./services/summaryService.js";
 import { PostgresStore } from "./store/postgresStore.js";
 import { createLogger } from "./utils/logger.js";
 import { readRuntimeConfig } from "./db/env.js";
@@ -54,6 +55,11 @@ async function bootstrap() {
     workerUrl: config.workerUrl,
     logger
   });
+  const summaryService = createSummaryService({
+    store,
+    workerUrl: config.workerUrl,
+    logger
+  });
   const followupEmailService = createFollowupEmailService({
     store,
     openAiApiKey: config.openAiApiKey,
@@ -66,6 +72,7 @@ async function bootstrap() {
       store,
       evaluationService,
       followupEmailService,
+      summaryService,
       logger
     })
   });
