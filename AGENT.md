@@ -198,7 +198,7 @@
 
 ## Live Talk Nudges + Session Metadata (2026-02-14)
 为提升产品感与实时引导，我们增加了 “Live nudges + session 侧栏标题/goal 摘要”：
-- Worker：新增 `/tasks/nudges`（默认 `NUDGE_MODEL=gpt-5-nano`）生成 1-3 条超短可复述的下一句提示。
-- API：每次 `appendSessionTurn` 后异步刷新 nudges（Redis 防抖），写入 `sessions.talk_nudges`。
+- Worker：新增 `/tasks/nudges`（默认 `NUDGE_MODEL=gpt-5-nano`）生成 2 条超短可复述的下一句提示（1 条更清晰的改写 + 1 条推进的问题）。
+- API：每次 `appendSessionTurn` 后异步刷新 nudges（每 3 次用户发言或 45 秒更新一次），写入 `sessions.talk_nudges`。
 - Worker：新增 `/tasks/session_metadata`（默认 `SESSION_METADATA_MODEL=gpt-5-nano`）生成 `displayTitle`（侧栏标题）和 `goalSummary`（stage 下的 goal 行）。
 - Web：Connect Agent 按钮旁增加红/绿连接指示点；侧栏标题限制两行且高度一致；stage 下展示 `Goal:` 的 nano 摘要。

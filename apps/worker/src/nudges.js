@@ -22,6 +22,8 @@ function buildPrompt({ session, conversationSummary, recentTurns }) {
   const custom = session?.customContext || "";
   const stage = session?.stageState || "SMALL_TALK";
   const transcript = formatTurns(recentTurns || []);
+  const lastUserTurn = [...(recentTurns || [])].reverse().find((turn) => turn?.role === "user");
+  const lastUserText = String(lastUserTurn?.content || "").trim().replaceAll("\n", " ");
 
   return [
     "You write ultra-short 'what to say next' nudges for a live networking conversation.",
@@ -36,11 +38,17 @@ function buildPrompt({ session, conversationSummary, recentTurns }) {
     "- Must be directly grounded in provided context; do not invent facts.",
     "- Do not mention AI, practice, scoring, stages, or 'transcript'.",
     "",
+    "Format rules:",
+    "- Nudge #1: rewrite the user's last point more clearly in one sentence (wording + pacing).",
+    "- Nudge #2: a specific next question that advances the conversation for this stage.",
+    "- If the user has not spoken yet, Nudge #1 is a natural opener; Nudge #2 is a light follow-up question.",
+    "",
     `Stage (internal): ${stage}`,
     goal ? `User goal: ${goal}` : "User goal: (not provided)",
     persona ? `Your persona/background:\n${persona}` : "Your persona/background: (not provided)",
     custom ? `Additional context:\n${custom}` : "",
     conversationSummary ? `Rolling summary:\n${conversationSummary}` : "",
+    lastUserText ? `User last message:\n${lastUserText}` : "User last message: (none yet)",
     transcript ? `Recent turns:\n${transcript}` : "Recent turns: (none)",
     "",
     "Return only JSON: {\"nudges\": [\"...\", \"...\"]}"

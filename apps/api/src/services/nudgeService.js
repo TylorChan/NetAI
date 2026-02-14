@@ -3,6 +3,8 @@ import { requestWorkerNudges } from "./workerClient.js";
 const MAX_ATTEMPTS = 2;
 const RETRY_DELAYS_MS = [900, 1800];
 const RECENT_TURNS = 14;
+const MIN_USER_TURNS_BETWEEN_UPDATES = 3;
+const MAX_SECONDS_BETWEEN_UPDATES = 45;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,6 +56,25 @@ async function computeNudges({ store, workerUrl, sessionId, logger }) {
 }
 
 export function createNudgeService({ store, workerUrl, logger }) {
+  async function shouldRefresh({ sessionId }) {
+    const session = await store.getSession(sessionId);
+    if (!session) return false;
+
+    if (!session.nudgesUpdatedAt) {
+      return true;
+    }
+
+    const lastUpdatedMs = new Date(session.nudgesUpdatedAt).getTime();
+    const elapsedMs = Date.now() - (Number.isFinite(lastUpdatedMs) ? lastUpdatedMs : 0);
+    if (elapsedMs >= MAX_SECONDS_BETWEEN_UPDATES * 1000) {
+      return true;
+    }
+
+    const turnsAfter = await store.listTurnsAfter(sessionId, session.nudgesUpdatedAt, 60);
+    const newUserTurns = turnsAfter.filter((turn) => turn?.role === "user");
+    return newUserTurns.length >= MIN_USER_TURNS_BETWEEN_UPDATES;
+  }
+
   async function refreshNudgesNow(sessionId) {
     try {
       const nudges = await computeNudges({ store, workerUrl, sessionId, logger });
@@ -70,14 +91,16 @@ export function createNudgeService({ store, workerUrl, logger }) {
   }
 
   async function queueNudges(sessionId) {
-    const shouldRun = await store.tryMarkNudgesPending(sessionId, 10);
+    const shouldRun = await store.tryMarkNudgesPending(sessionId, 8);
     if (!shouldRun) {
       return;
     }
 
     Promise.resolve().then(async () => {
       try {
-        await refreshNudgesNow(sessionId);
+        if (await shouldRefresh({ sessionId })) {
+          await refreshNudgesNow(sessionId);
+        }
       } finally {
         await store.clearNudgesPending(sessionId);
       }
