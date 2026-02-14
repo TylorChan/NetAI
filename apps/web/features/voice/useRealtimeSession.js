@@ -100,7 +100,9 @@ function buildInstructions({
   targetProfileContext,
   customContext,
   conversationSummary,
-  history
+  history,
+  stageEnteredAt,
+  stageUserTurns
 }) {
   const stage = normalizeStage(stageState);
   const stageDirective = STAGE_PROMPTS[stage];
@@ -109,6 +111,12 @@ function buildInstructions({
   const customText = truncateForPrompt(customContext, 1200);
   const rolling = String(conversationSummary || "").trim();
   const transcript = formatSeedTranscriptForPrompt(history);
+  const enteredAtMs = stageEnteredAt ? new Date(stageEnteredAt).getTime() : 0;
+  const elapsedSec =
+    Number.isFinite(enteredAtMs) && enteredAtMs > 0 ? Math.max(0, Math.floor((Date.now() - enteredAtMs) / 1000)) : 0;
+  const elapsedMin = elapsedSec ? Math.floor(elapsedSec / 60) : 0;
+  const elapsedRem = elapsedSec ? elapsedSec % 60 : 0;
+  const turns = Number.isFinite(Number(stageUserTurns)) ? Number(stageUserTurns) : 0;
 
   return [
     "You are the user's real-world networking contact sitting across from them.",
@@ -129,10 +137,14 @@ function buildInstructions({
     "Conversation style:",
     "- Sound like a real person: concise, warm, curious, and occasionally candid.",
     "- Use contractions and varied phrasing; avoid robotic checklists.",
-    "- Ask one focused question per turn. Keep responses under 3 sentences.",
-    "- Do not monologue. Do not self-interrupt.",
+    "- Usually end with a question to keep it flowing, but it's OK to end with a statement when it feels natural or when coaching.",
+    "- Keep responses tight (typically 2-6 sentences). Avoid long monologues. Do not self-interrupt.",
     "",
     `Conversation phase (internal): ${stage}. ${stageDirective} (do not mention to the user).`,
+    elapsedSec
+      ? `Stage pacing signals (internal): elapsed ${elapsedMin}m${String(elapsedRem).padStart(2, "0")}s, user turns ${turns}.`
+      : "Stage pacing signals (internal): elapsed unknown, user turns unknown.",
+    "Pacing guidance (internal): aim roughly SMALL_TALK 2-3m, EXPERIENCE 6-8m, ADVICE 3-4m, WRAP_UP 2-3m. Do not rush transitions.",
     goalText ? `User's networking goal (internal): ${goalText}` : "",
     personaText
       ? `Your persona/background (internal):\n<<<PERSONA_START\n${personaText}\nPERSONA_END>>>`
@@ -144,7 +156,7 @@ function buildInstructions({
       : "If this is a new session, start with a warm, natural opener.",
     "Stage transitions are backend-controlled.",
     "Never switch stage yourself.",
-    "When user asks to move stage, call request_stage_transition tool first.",
+    "When it feels natural to move forward (and the pacing signals suggest it's not too early), call request_stage_transition tool before moving.",
     "If tool returns denied, stay in current stage and continue current-stage questioning.",
     "Never interrupt yourself; finish one answer before asking the next question."
   ].join("\n");
@@ -246,7 +258,9 @@ function createNetworkingCoachAgent({ pushEvent, onStageTransition }) {
         targetProfileContext: runContext?.context?.targetProfileContext,
         customContext: runContext?.context?.customContext,
         conversationSummary: runContext?.context?.conversationSummary,
-        history: runContext?.context?.history
+        history: runContext?.context?.history,
+        stageEnteredAt: runContext?.context?.stageEnteredAt,
+        stageUserTurns: runContext?.context?.stageUserTurns
       })
   });
 }
@@ -254,6 +268,8 @@ function createNetworkingCoachAgent({ pushEvent, onStageTransition }) {
 export function useRealtimeSession({
   sessionId,
   stageState,
+  stageEnteredAt,
+  stageUserTurns,
   goal,
   targetProfileContext,
   customContext,
@@ -272,6 +288,8 @@ export function useRealtimeSession({
   const seenTranscriptRef = useRef(new Set());
   const appliedContextRef = useRef({
     stageState: "SMALL_TALK",
+    stageEnteredAt: "",
+    stageUserTurns: 0,
     goal: "",
     targetProfileContext: "",
     customContext: "",
@@ -413,6 +431,8 @@ export function useRealtimeSession({
       const runtimeContext = {
         sessionId,
         stageState: normalizeStage(stageState),
+        stageEnteredAt: stageEnteredAt ? String(stageEnteredAt) : "",
+        stageUserTurns: Number.isFinite(Number(stageUserTurns)) ? Number(stageUserTurns) : 0,
         goal: String(goal || "").trim(),
         targetProfileContext: String(targetProfileContext || "").trim(),
         customContext: String(customContext || "").trim(),
@@ -420,6 +440,8 @@ export function useRealtimeSession({
       };
       appliedContextRef.current = {
         stageState: runtimeContext.stageState,
+        stageEnteredAt: runtimeContext.stageEnteredAt,
+        stageUserTurns: runtimeContext.stageUserTurns,
         goal: runtimeContext.goal,
         targetProfileContext: runtimeContext.targetProfileContext,
         customContext: runtimeContext.customContext,
@@ -499,7 +521,7 @@ export function useRealtimeSession({
       pushEvent(`Connect failed: ${error.message}`);
       disconnect();
     }
-  }, [customContext, conversationSummary, disconnect, emitTranscript, goal, hydrateLocalHistory, pushEvent, sessionId, stageState, targetProfileContext]);
+  }, [customContext, conversationSummary, disconnect, emitTranscript, goal, hydrateLocalHistory, pushEvent, sessionId, stageEnteredAt, stageState, stageUserTurns, targetProfileContext]);
 
   useEffect(() => {
     if (status !== "CONNECTED" || !sessionRef.current) {
@@ -507,6 +529,8 @@ export function useRealtimeSession({
     }
 
     const nextStage = normalizeStage(stageState);
+    const nextStageEnteredAt = stageEnteredAt ? String(stageEnteredAt) : "";
+    const nextStageUserTurns = Number.isFinite(Number(stageUserTurns)) ? Number(stageUserTurns) : 0;
     const nextGoal = String(goal || "").trim();
     const nextPersona = String(targetProfileContext || "").trim();
     const nextCustom = String(customContext || "").trim();
@@ -515,6 +539,8 @@ export function useRealtimeSession({
 
     if (
       currentApplied.stageState === nextStage &&
+      currentApplied.stageEnteredAt === nextStageEnteredAt &&
+      currentApplied.stageUserTurns === nextStageUserTurns &&
       currentApplied.goal === nextGoal &&
       currentApplied.targetProfileContext === nextPersona &&
       currentApplied.customContext === nextCustom &&
@@ -525,6 +551,8 @@ export function useRealtimeSession({
 
     appliedContextRef.current = {
       stageState: nextStage,
+      stageEnteredAt: nextStageEnteredAt,
+      stageUserTurns: nextStageUserTurns,
       goal: nextGoal,
       targetProfileContext: nextPersona,
       customContext: nextCustom,
@@ -536,6 +564,8 @@ export function useRealtimeSession({
     }
 
     sessionRef.current.context.context.stageState = nextStage;
+    sessionRef.current.context.context.stageEnteredAt = nextStageEnteredAt;
+    sessionRef.current.context.context.stageUserTurns = nextStageUserTurns;
     sessionRef.current.context.context.goal = nextGoal;
     sessionRef.current.context.context.targetProfileContext = nextPersona;
     sessionRef.current.context.context.customContext = nextCustom;
@@ -548,7 +578,9 @@ export function useRealtimeSession({
     goal,
     conversationSummary,
     pushEvent,
+    stageEnteredAt,
     stageState,
+    stageUserTurns,
     status,
     targetProfileContext
   ]);

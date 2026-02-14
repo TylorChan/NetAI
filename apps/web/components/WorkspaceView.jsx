@@ -227,7 +227,8 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const [transcriptHeightPct, setTranscriptHeightPct] = useState(64);
   const [error, setError] = useState("");
   const [loadingSessions, setLoadingSessions] = useState(false);
-  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailGenerateLoading, setEmailGenerateLoading] = useState(false);
+  const [emailRegenerateLoading, setEmailRegenerateLoading] = useState(false);
   const [finalizeLoading, setFinalizeLoading] = useState(false);
   const [openSessionMenuId, setOpenSessionMenuId] = useState(null);
   const [sessionMenuPos, setSessionMenuPos] = useState(null);
@@ -282,7 +283,16 @@ export default function WorkspaceView({ initialSessionId = null }) {
 
       try {
         const data = await graphqlRequest(queries.getSessionResume, { sessionId });
-        setResume(data.getSessionResume);
+        const nextResume = data.getSessionResume;
+        setResume(nextResume);
+        // Resume stored follow-up email draft, but don't clobber an already-loaded draft with empty/null.
+        const resumeEmail = nextResume?.followupEmail || null;
+        setFollowupEmail((prev) => {
+          if (prev?.subject && prev?.body && (!resumeEmail?.subject || !resumeEmail?.body)) {
+            return prev;
+          }
+          return resumeEmail;
+        });
       } catch (loadError) {
         if (loadError?.message === "UNAUTHENTICATED") {
           clearAuth();
@@ -430,6 +440,8 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const { status: realtimeStatus, connect, disconnect } = useRealtimeSession({
     sessionId: activeSessionId,
     stageState: resume?.session?.stageState,
+    stageEnteredAt: resume?.session?.stageEnteredAt,
+    stageUserTurns: resume?.session?.stageUserTurns,
     goal: resume?.session?.goal,
     targetProfileContext: resume?.session?.targetProfileContext,
     customContext: resume?.session?.customContext,
@@ -516,6 +528,8 @@ export default function WorkspaceView({ initialSessionId = null }) {
     if (sessionLoaderTimerRef.current) {
       clearTimeout(sessionLoaderTimerRef.current);
     }
+    setEmailGenerateLoading(false);
+    setEmailRegenerateLoading(false);
 
     if (!isAuthed || !activeSessionId) {
       setResume(null);
@@ -962,9 +976,35 @@ export default function WorkspaceView({ initialSessionId = null }) {
       return;
     }
 
-    setEmailLoading(true);
+    // Keep the drawer closed while generating; only open once the result is ready.
+    setShowEmailDrawer(false);
+    setEmailGenerateLoading(true);
     setError("");
-    setShowEmailDrawer(true);
+
+    try {
+      const data = await graphqlRequest(mutations.generateFollowupEmail, {
+        input: {
+          sessionId: activeSessionId,
+          tone: "professional",
+          length: "medium"
+        }
+      });
+      setFollowupEmail(data.generateFollowupEmail);
+      setShowEmailDrawer(true);
+    } catch (emailError) {
+      setError(emailError.message);
+    } finally {
+      setEmailGenerateLoading(false);
+    }
+  }
+
+  async function handleRegenerateEmail() {
+    if (!activeSessionId) {
+      return;
+    }
+
+    setEmailRegenerateLoading(true);
+    setError("");
 
     try {
       const data = await graphqlRequest(mutations.generateFollowupEmail, {
@@ -978,7 +1018,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
     } catch (emailError) {
       setError(emailError.message);
     } finally {
-      setEmailLoading(false);
+      setEmailRegenerateLoading(false);
     }
   }
 
@@ -1212,12 +1252,12 @@ export default function WorkspaceView({ initialSessionId = null }) {
                       <button
                         type="button"
                         onClick={handleEmailAction}
-                        className="with-spinner"
-                        disabled={emailLoading}
+                        className="with-spinner email-action-button"
+                        disabled={emailGenerateLoading}
                       >
-                        {emailLoading ? <LoadingSpinner /> : null}
+                        {emailGenerateLoading ? <LoadingSpinner /> : null}
                         <span>
-                          {emailLoading
+                          {emailGenerateLoading
                             ? "Generating..."
                             : followupEmail
                               ? "See Follow-up Email"
@@ -1355,7 +1395,11 @@ export default function WorkspaceView({ initialSessionId = null }) {
               <div className="email-drawer-header">
                 <h3>Follow-up Email</h3>
                 {showEmailDrawer ? (
-                  <button type="button" className="ghost-button" onClick={() => setShowEmailDrawer(false)}>
+                  <button
+                    type="button"
+                    className="connect-agent-button"
+                    onClick={() => setShowEmailDrawer(false)}
+                  >
                     Hide
                   </button>
                 ) : null}
@@ -1369,12 +1413,12 @@ export default function WorkspaceView({ initialSessionId = null }) {
                   <div className="email-drawer-actions">
                     <button
                       type="button"
-                      className="ghost-button with-spinner"
-                      onClick={handleGenerateEmail}
-                      disabled={emailLoading}
+                      className="with-spinner email-action-button"
+                      onClick={handleRegenerateEmail}
+                      disabled={emailRegenerateLoading}
                     >
-                      {emailLoading ? <LoadingSpinner /> : null}
-                      <span>{emailLoading ? "Regenerating..." : "Regenerate"}</span>
+                      {emailRegenerateLoading ? <LoadingSpinner /> : null}
+                      <span>{emailRegenerateLoading ? "Regenerating..." : "Regenerate"}</span>
                     </button>
                   </div>
                 </>
@@ -1404,7 +1448,7 @@ export default function WorkspaceView({ initialSessionId = null }) {
                 <h3>Evaluation Result</h3>
                 <button
                   type="button"
-                  className="ghost-button"
+                  className="connect-agent-button"
                   onClick={() => setShowEvaluationModal(false)}
                 >
                   Close

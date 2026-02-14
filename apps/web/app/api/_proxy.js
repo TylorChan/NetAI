@@ -75,3 +75,59 @@ export async function proxyJson(request, upstreamPath) {
     );
   }
 }
+
+export async function proxyRaw(request, upstreamPath) {
+  const api = getApiServerUrl();
+  const url = `${api}${upstreamPath}`;
+
+  try {
+    const body =
+      request.method === "GET" || request.method === "HEAD"
+        ? undefined
+        : Buffer.from(await request.arrayBuffer());
+
+    const upstream = await fetch(url, {
+      method: request.method,
+      headers: filterRequestHeaders(request.headers),
+      body,
+      redirect: "manual",
+      cache: "no-store"
+    });
+
+    const responseBody = await upstream.arrayBuffer();
+    const headers = new Headers();
+
+    const contentType = upstream.headers.get("content-type");
+    if (contentType) headers.set("content-type", contentType);
+
+    // Preserve auth cookies set by the API server.
+    if (typeof upstream.headers.getSetCookie === "function") {
+      for (const value of upstream.headers.getSetCookie()) {
+        headers.append("set-cookie", value);
+      }
+    } else {
+      const setCookie = upstream.headers.get("set-cookie");
+      if (setCookie) headers.set("set-cookie", setCookie);
+    }
+
+    return new Response(responseBody, {
+      status: upstream.status,
+      headers
+    });
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        error: "UPSTREAM_UNAVAILABLE",
+        message: "Failed to reach API server from Next.js proxy.",
+        api,
+        upstreamPath
+      }),
+      {
+        status: 502,
+        headers: {
+          "content-type": "application/json"
+        }
+      }
+    );
+  }
+}

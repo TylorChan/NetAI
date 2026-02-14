@@ -38,6 +38,18 @@ ALTER TABLE sessions
   ADD COLUMN IF NOT EXISTS talk_nudges JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE sessions
   ADD COLUMN IF NOT EXISTS nudges_updated_at TIMESTAMPTZ;
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS followup_email_subject TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS followup_email_body TEXT NOT NULL DEFAULT '';
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS followup_email_updated_at TIMESTAMPTZ;
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS stage_entered_at TIMESTAMPTZ;
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS stage_user_turns INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS stage_signal_flags JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_updated
   ON sessions (user_id, updated_at DESC);

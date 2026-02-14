@@ -16,6 +16,8 @@ export const typeDefs = /* GraphQL */ `
     targetProfileContext: String
     customContext: String
     stageState: String!
+    stageEnteredAt: String!
+    stageUserTurns: Int!
     talkNudges: [String!]!
     createdAt: String!
     updatedAt: String!
@@ -46,6 +48,7 @@ export const typeDefs = /* GraphQL */ `
     contextSummary: String!
     conversationSummary: String!
     talkNudges: [String!]!
+    followupEmail: FollowupEmailSuggestion
     stageHint: String!
   }
 

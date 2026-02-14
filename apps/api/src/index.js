@@ -4,6 +4,7 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import multer from "multer";
 import { Pool } from "pg";
 import Redis from "ioredis";
 import { createYoga, createSchema } from "graphql-yoga";
@@ -18,6 +19,7 @@ import { createFollowupEmailService } from "./services/followupEmailService.js";
 import { createSummaryService } from "./services/summaryService.js";
 import { createNudgeService } from "./services/nudgeService.js";
 import { createSessionMetadataService } from "./services/sessionMetadataService.js";
+import { createProfileImageService } from "./services/profileImageService.js";
 import { PostgresStore } from "./store/postgresStore.js";
 import { createLogger } from "./utils/logger.js";
 import { readRuntimeConfig } from "./db/env.js";
@@ -77,6 +79,11 @@ async function bootstrap() {
     openAiApiKey: config.openAiApiKey,
     model: config.followupEmailModel
   });
+  const profileImageService = createProfileImageService({
+    openAiApiKey: config.openAiApiKey,
+    model: config.profileImageModel,
+    logger
+  });
 
   const schema = createSchema({
     typeDefs,
@@ -129,6 +136,58 @@ async function bootstrap() {
   app.use("/v1", express.json({ limit: "1mb" }));
 
   registerAuthRoutes({ app, store, config, logger });
+
+  const profileLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false
+  });
+
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      files: 6,
+      fileSize: 7 * 1024 * 1024 // 7MB each
+    },
+    fileFilter: (_req, file, cb) => {
+      const type = String(file?.mimetype || "").toLowerCase();
+      if (type.startsWith("image/")) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error("Only image files are allowed"));
+    }
+  });
+
+  app.post(
+    "/v1/profile/target-profile-from-images",
+    profileLimiter,
+    upload.array("images", 6),
+    async (req, res) => {
+      try {
+        const user = getUserFromHeaders({
+          cookieHeader: req.headers.cookie || "",
+          authorizationHeader: req.headers.authorization || "",
+          jwtSecret: config.jwtSecret
+        });
+        if (!user?.id) {
+          return res.status(401).json({ error: "UNAUTHENTICATED" });
+        }
+
+        const files = Array.isArray(req.files) ? req.files : [];
+        const targetProfileContext = await profileImageService.targetProfileFromImages(files);
+        return res.json({ targetProfileContext });
+      } catch (error) {
+        const status =
+          typeof error.status === "number" && error.status >= 400 && error.status < 600
+            ? error.status
+            : 500;
+        logger.warn("target profile image import failed", { error: error.message });
+        return res.status(status).json({ error: error.message });
+      }
+    }
+  );
 
   const graphqlLimiter = rateLimit({
     windowMs: config.graphqlRateLimitWindowMs,
@@ -185,6 +244,23 @@ async function bootstrap() {
   });
 
   app.use("/graphql", graphqlLimiter, yoga);
+
+  // Normalize known upload errors (multer, file type limits) into JSON.
+  app.use((err, _req, res, next) => {
+    if (!err) return next();
+
+    const isMulter = err instanceof multer.MulterError;
+    if (isMulter) {
+      const status = err.code === "LIMIT_FILE_SIZE" || err.code === "LIMIT_FILE_COUNT" ? 413 : 400;
+      return res.status(status).json({ error: err.message });
+    }
+
+    if (String(err.message || "").includes("Only image files are allowed")) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    return next(err);
+  });
 
   const server = app.listen(config.port, () => {
     logger.info("api started", { port: config.port });

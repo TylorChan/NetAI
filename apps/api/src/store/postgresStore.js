@@ -3,7 +3,9 @@ import {
   evaluateStageTransition,
   getStageHint,
   normalizeRequestedStage,
-  normalizeStage
+  normalizeStage,
+  shouldAdvanceStage,
+  updateStageSignals
 } from "./networkingStage.js";
 
 const SESSION_CACHE_TTL_SECONDS = 45;
@@ -56,8 +58,25 @@ function mapSession(row) {
     targetProfileContext: row.target_profile_context,
     customContext: row.custom_context,
     stageState: normalizeStage(row.stage_state),
+    stageEnteredAt: toIso(row.stage_entered_at) || toIso(row.created_at),
+    stageUserTurns: Number.isFinite(Number(row.stage_user_turns)) ? Number(row.stage_user_turns) : 0,
+    stageSignalFlags:
+      row.stage_signal_flags && typeof row.stage_signal_flags === "object"
+        ? row.stage_signal_flags
+        : typeof row.stage_signal_flags === "string"
+          ? (() => {
+              try {
+                return JSON.parse(row.stage_signal_flags);
+              } catch {
+                return {};
+              }
+            })()
+          : {},
     conversationSummary: row.conversation_summary || "",
     talkNudges,
+    followupEmailSubject: row.followup_email_subject || "",
+    followupEmailBody: row.followup_email_body || "",
+    followupEmailUpdatedAt: toIso(row.followup_email_updated_at),
     summaryCursorAt: toIso(row.summary_cursor_at),
     summaryUpdatedAt: toIso(row.summary_updated_at),
     nudgesUpdatedAt: toIso(row.nudges_updated_at),
@@ -285,6 +304,30 @@ export class PostgresStore {
     }
   }
 
+  async saveFollowupEmailDraft({ sessionId, subject, body }) {
+    const cleanedSubject = String(subject || "").trim();
+    const cleanedBody = String(body || "").trim();
+
+    const result = await this.pool.query(
+      `
+      UPDATE sessions
+      SET
+        followup_email_subject = $2,
+        followup_email_body = $3,
+        followup_email_updated_at = NOW(),
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING user_id
+      `,
+      [sessionId, cleanedSubject, cleanedBody]
+    );
+
+    if (result.rows?.length) {
+      const userId = result.rows[0].user_id;
+      await this.cacheDel(sessionCacheKey(sessionId), sessionsListCacheKey(userId));
+    }
+  }
+
   async countUsers() {
     const result = await this.pool.query(`SELECT COUNT(*)::int AS count FROM users`);
     return result.rows?.[0]?.count || 0;
@@ -452,11 +495,14 @@ export class PostgresStore {
         target_profile_context,
         custom_context,
         stage_state,
+        stage_entered_at,
+        stage_user_turns,
+        stage_signal_flags,
         created_at,
         updated_at,
         ended_at
       )
-      VALUES ($1, $2, $3, 'ACTIVE', $4, $5, 'SMALL_TALK', $6, $6, NULL)
+      VALUES ($1, $2, $3, 'ACTIVE', $4, $5, 'SMALL_TALK', $6, 0, '{}'::jsonb, $6, $6, NULL)
       RETURNING *
       `,
       [id, userId, goal, finalTarget, normalizedCustom, ts]
@@ -549,10 +595,32 @@ export class PostgresStore {
 
       let nextSession = currentSession;
       if (transition.applied) {
+        const policy = shouldAdvanceStage({
+          currentStage: currentSession.stageState,
+          stageEnteredAt: currentSession.stageEnteredAt,
+          stageUserTurns: currentSession.stageUserTurns,
+          stageSignalFlags: currentSession.stageSignalFlags,
+          // Use deterministic stored signals/turn counts. Do not treat "reason" as user content.
+          latestUserContent: "",
+          isRequested: true
+        });
+
+        if (!policy.advance || policy.nextStage !== transition.nextStage) {
+          transition.applied = false;
+          transition.reason = policy.reason || "Stage transition not allowed yet";
+        }
+      }
+
+      if (transition.applied) {
         const updateResult = await client.query(
           `
           UPDATE sessions
-          SET stage_state = $2, updated_at = NOW()
+          SET
+            stage_state = $2,
+            stage_entered_at = NOW(),
+            stage_user_turns = 0,
+            stage_signal_flags = '{}'::jsonb,
+            updated_at = NOW()
           WHERE id = $1
           RETURNING *
           `,
@@ -596,7 +664,7 @@ export class PostgresStore {
       await client.query("BEGIN");
 
       const sessionResult = await client.query(
-        `SELECT id, user_id, stage_state FROM sessions WHERE id = $1 FOR UPDATE`,
+        `SELECT * FROM sessions WHERE id = $1 FOR UPDATE`,
         [sessionId]
       );
 
@@ -604,6 +672,7 @@ export class PostgresStore {
         throw new Error("session not found");
       }
 
+      const currentSession = mapSession(sessionResult.rows[0]);
       const turnId = randomUUID();
       const createdAt = nowIso();
 
@@ -616,13 +685,41 @@ export class PostgresStore {
         [turnId, sessionId, role, content, createdAt]
       );
 
+      let nextStageState = currentSession.stageState;
+      let nextStageEnteredAt = currentSession.stageEnteredAt || createdAt;
+      let nextStageUserTurns = currentSession.stageUserTurns || 0;
+      let nextSignalFlags = currentSession.stageSignalFlags || {};
+
+      const trimmedContent = String(content || "").trim();
+      const isUserTurn = role === "user";
+      if (isUserTurn) {
+        nextStageUserTurns = nextStageUserTurns + 1;
+        nextSignalFlags = updateStageSignals({
+          stage: nextStageState,
+          flags: nextSignalFlags,
+          latestUserContent: trimmedContent
+        });
+      }
+
       await client.query(
         `
         UPDATE sessions
-        SET updated_at = $2, stage_state = $3
+        SET
+          updated_at = $2,
+          stage_state = $3,
+          stage_entered_at = $4::timestamptz,
+          stage_user_turns = $5,
+          stage_signal_flags = $6::jsonb
         WHERE id = $1
         `,
-        [sessionId, createdAt, normalizeStage(sessionResult.rows[0].stage_state)]
+        [
+          sessionId,
+          createdAt,
+          normalizeStage(nextStageState),
+          nextStageEnteredAt || createdAt,
+          nextStageUserTurns,
+          JSON.stringify(nextSignalFlags || {})
+        ]
       );
 
       await client.query("COMMIT");
@@ -674,6 +771,13 @@ export class PostgresStore {
     );
 
     const recentTurns = turnsResult.rows.reverse().map(mapTurn);
+    const followupEmail =
+      session.followupEmailSubject?.trim() && session.followupEmailBody?.trim()
+        ? {
+            subject: session.followupEmailSubject.trim(),
+            body: session.followupEmailBody.trim()
+          }
+        : null;
 
     return {
       session,
@@ -684,6 +788,7 @@ export class PostgresStore {
         "Default networking context",
       conversationSummary: session.conversationSummary || "",
       talkNudges: session.talkNudges || [],
+      followupEmail,
       stageHint: getStageHint(session.stageState)
     };
   }

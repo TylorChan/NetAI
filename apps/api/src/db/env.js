@@ -14,6 +14,7 @@ export function readRuntimeConfig() {
     openAiApiKey: readRequiredEnv("OPENAI_API_KEY"),
     openAiRealtimeModel: process.env.OPENAI_REALTIME_MODEL || "gpt-realtime",
     followupEmailModel: process.env.FOLLOWUP_EMAIL_MODEL || "gpt-5.2",
+    profileImageModel: process.env.PROFILE_IMAGE_MODEL || "gpt-5-mini",
     workerUrl: readRequiredEnv("WORKER_URL"),
     databaseUrl: readRequiredEnv("DATABASE_URL"),
     redisUrl: readRequiredEnv("REDIS_URL"),

@@ -120,6 +120,10 @@ export const queries = {
         contextSummary
         conversationSummary
         talkNudges
+        followupEmail {
+          subject
+          body
+        }
         stageHint
         session {
           id
@@ -129,6 +133,8 @@ export const queries = {
           goalSummary
           status
           stageState
+          stageEnteredAt
+          stageUserTurns
           targetProfileContext
           customContext
           createdAt

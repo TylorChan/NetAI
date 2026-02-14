@@ -202,3 +202,9 @@
 - API：每次 `appendSessionTurn` 后异步刷新 nudges（每 3 次用户发言或 45 秒更新一次），写入 `sessions.talk_nudges`。
 - Worker：新增 `/tasks/session_metadata`（默认 `SESSION_METADATA_MODEL=gpt-5-nano`）生成 `displayTitle`（侧栏标题）和 `goalSummary`（stage 下的 goal 行）。
 - Web：Connect Agent 按钮旁增加红/绿连接指示点；侧栏标题限制两行且高度一致；stage 下展示 `Goal:` 的 nano 摘要。
+
+## Stage Progression: Agent-Led (2026-02-14)
+为避免「assistant 还在纠错但 stage 机械跳转」的问题，我们把 stage 推进改成更贴近真实 coffee chat 的做法：
+- API：关闭 `appendSessionTurn` 内的自动 stage 推进，只保留 `stage_user_turns` + `stage_signal_flags` 的更新；stage 只会在 Realtime agent 调用 `request_stage_transition` tool 后由后端审核通过再切换。
+- Policy：对 tool 请求增加最小停留时间（避免聊两句就能跳 stage），并保留信号/turn 作为辅助 gating。
+- Web Prompt：Realtime 指令里去掉“每回合必须问问题”的机械规则；注入 `stageEnteredAt/stageUserTurns` 作为“节奏信号”，允许 agent 根据“聊到什么程度 + 时间感”来决定何时请求推进。

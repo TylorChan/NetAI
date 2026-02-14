@@ -198,6 +198,11 @@ export function createFollowupEmailService({ store, openAiApiKey, model = "gpt-5
         length
       });
       if (generated) {
+        await store.saveFollowupEmailDraft({
+          sessionId,
+          subject: generated.subject,
+          body: generated.body
+        });
         return generated;
       }
 
@@ -209,10 +214,18 @@ export function createFollowupEmailService({ store, openAiApiKey, model = "gpt-5
       const body = length === "short" ? shortBody : length === "long" ? longBody : mediumBody;
       const withFeedback = body;
 
-      return {
+      const fallback = {
         subject: `Quick follow-up on ${session.goal}`,
         body: `Hi,\n\n${withFeedback}\n\nBest regards,\n${senderName}`
       };
+
+      await store.saveFollowupEmailDraft({
+        sessionId,
+        subject: fallback.subject,
+        body: fallback.body
+      });
+
+      return fallback;
     }
   };
 }
