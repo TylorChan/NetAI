@@ -1101,6 +1101,21 @@ button {
   cursor: pointer;
 }
 
+.connect-agent-button {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.connect-agent-button:hover:not(:disabled) {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.connect-agent-button:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.5);
+  outline-offset: 2px;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;

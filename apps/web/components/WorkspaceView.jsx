@@ -691,9 +691,9 @@ export default function WorkspaceView({ initialSessionId = null }) {
     ? "Loading Session..."
     : evaluation
       ? hasConversationChanges
-        ? "Finalize + Re-evaluate"
-        : "See Score Below"
-      : "Finalize + Evaluate";
+        ? "Refresh Report"
+        : "View Report"
+      : "Get Report";
 
   const primaryRowsStyle = activeSessionReady
     ? {
@@ -1178,14 +1178,15 @@ export default function WorkspaceView({ initialSessionId = null }) {
                   <div className="chat-bottom-stack">
                     <div className="button-row session-actions-row">
                       {realtimeStatus === "CONNECTED" ? (
-                        <button type="button" onClick={disconnect}>
+                        <button type="button" onClick={disconnect} className="connect-agent-button">
+                          <span className="connect-dot on" aria-hidden="true" />
                           Disconnect Agent
                         </button>
                       ) : (
                         <button
                           type="button"
                           onClick={connect}
-                          className="with-spinner"
+                          className="with-spinner connect-agent-button"
                           disabled={realtimeStatus === "CONNECTING"}
                         >
                           {realtimeStatus === "CONNECTING" ? <LoadingSpinner /> : null}
