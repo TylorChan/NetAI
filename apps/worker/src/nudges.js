@@ -54,8 +54,7 @@ export async function generateNudges({ session, conversationSummary, recentTurns
   const model = process.env.NUDGE_MODEL || "gpt-5-mini";
   const llm = new ChatOpenAI({
     apiKey,
-    model,
-    temperature: 0.3
+    model
   });
 
   const structured = llm.withStructuredOutput(NudgesSchema, {

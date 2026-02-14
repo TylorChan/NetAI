@@ -36,8 +36,7 @@ export async function generateSessionMetadata({ goal, targetProfileContext, cust
   const model = process.env.SESSION_METADATA_MODEL || "gpt-5-mini";
   const llm = new ChatOpenAI({
     apiKey,
-    model,
-    temperature: 0.2
+    model
   });
 
   const structured = llm.withStructuredOutput(MetadataSchema, {
