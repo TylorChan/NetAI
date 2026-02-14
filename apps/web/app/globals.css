@@ -332,6 +332,7 @@ body.session-mode .shell {
   width: 8px;
   height: 8px;
   border-radius: 999px;
+  display: inline-block;
   background: #ef4444;
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
   flex: 0 0 auto;
@@ -1105,6 +1106,9 @@ button {
   background: transparent;
   border: 1px solid var(--accent);
   color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .connect-agent-button:hover:not(:disabled) {
