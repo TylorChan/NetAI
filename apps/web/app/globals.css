@@ -141,6 +141,32 @@ body.session-mode .shell {
   line-height: 1.4;
 }
 
+.user-menu-trigger {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.user-menu-trigger:hover {
+  background: rgba(15, 23, 42, 0.45);
+  border-color: rgba(148, 163, 184, 0.22);
+  color: #e2e8f0;
+}
+
+.user-menu-trigger:focus-visible {
+  outline: 2px solid #5eead4;
+  outline-offset: 2px;
+}
+
 .ghost-button.new-session-trigger {
   width: 100%;
   background: transparent;
@@ -421,43 +447,30 @@ body.session-mode .shell {
 .auth-panel {
   margin-top: 26px;
   width: min(520px, 96%);
-  border: 1px solid #dfe5ee;
-  border-radius: 18px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 20px;
   padding: 14px 14px 12px;
   background: transparent;
 }
 
-.auth-panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
-}
-
-.auth-panel h2 {
-  margin: 0;
-  font-size: 18px;
-  color: #0f172a;
-}
-
-.auth-panel .muted {
-  margin: 6px 0 0;
-}
-
 .auth-toggle {
   display: inline-flex;
-  border: 1px solid #dfe5ee;
+  justify-content: center;
+  border: 1px solid rgba(15, 118, 110, 0.22);
   border-radius: 999px;
   padding: 2px;
   gap: 2px;
+  margin-bottom: 12px;
+  width: max-content;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .auth-toggle button {
   background: transparent;
   color: #475467;
   border: 0;
-  padding: 6px 10px;
+  padding: 7px 12px;
   border-radius: 999px;
   min-height: unset;
 }
@@ -478,6 +491,17 @@ body.session-mode .shell {
   margin: 0;
 }
 
+.auth-form input {
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.auth-form input:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.5);
+  outline-offset: 2px;
+}
+
 .auth-error {
   margin-top: 2px;
 }
@@ -485,6 +509,9 @@ body.session-mode .shell {
 .auth-submit {
   width: 100%;
   justify-content: center;
+  align-self: center;
+  border-radius: 999px;
+  padding: 11px 14px;
 }
 
 .session-loading-stage {

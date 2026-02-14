@@ -55,7 +55,15 @@ export function registerAuthRoutes({ app, store, config, logger }) {
 
     const id = randomUUID();
     const passwordHash = await bcrypt.hash(password, 12);
-    const userRow = await store.createUser({ id, email, name, passwordHash });
+    let userRow;
+    try {
+      userRow = await store.createUser({ id, email, name, passwordHash });
+    } catch (error) {
+      if (error?.code === "23505") {
+        return res.status(409).json({ error: "Email already registered" });
+      }
+      throw error;
+    }
 
     // One-time migration for projects that started as single-user "default-user".
     const userCount = await store.countUsers();
@@ -124,4 +132,3 @@ export function registerAuthRoutes({ app, store, config, logger }) {
     return res.json({ user: publicUser(row) });
   });
 }
-

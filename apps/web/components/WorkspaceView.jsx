@@ -8,6 +8,7 @@ import TranscriptPanel from "@/components/TranscriptPanel";
 import { graphqlRequest, mutations, queries } from "@/lib/graphql";
 import { useRealtimeSession } from "@/features/voice/useRealtimeSession";
 import { authMe } from "@/lib/auth";
+import { authLogout } from "@/lib/auth";
 
 const STAGE_SEQUENCE = ["SMALL_TALK", "EXPERIENCE", "ADVICE", "WRAP_UP", "DONE"];
 
@@ -229,6 +230,8 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const [openSessionMenuId, setOpenSessionMenuId] = useState(null);
   const [sessionMenuPos, setSessionMenuPos] = useState(null);
   const [sessionActionBusyId, setSessionActionBusyId] = useState("");
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [userMenuPos, setUserMenuPos] = useState(null);
 
   const isAuthed = authStatus === "authed";
   const hasSelectedSession = isAuthed && Boolean(activeSessionId);
@@ -631,6 +634,20 @@ export default function WorkspaceView({ initialSessionId = null }) {
     return () => window.removeEventListener("scroll", onAnyScroll, true);
   }, [openSessionMenuId]);
 
+  useEffect(() => {
+    if (!showUserMenu) {
+      return;
+    }
+
+    function onAnyScroll() {
+      setShowUserMenu(false);
+      setUserMenuPos(null);
+    }
+
+    window.addEventListener("scroll", onAnyScroll, true);
+    return () => window.removeEventListener("scroll", onAnyScroll, true);
+  }, [showUserMenu]);
+
   const turns = useMemo(() => {
     const persistedTurns = resume?.recentTurns || [];
     const streamedTurns = Object.values(liveTurns);
@@ -780,6 +797,47 @@ export default function WorkspaceView({ initialSessionId = null }) {
       up: openUp
     });
     setOpenSessionMenuId(session.id);
+  }
+
+  function toggleUserMenu(event) {
+    event.stopPropagation();
+    setError("");
+
+    if (!currentUser) {
+      return;
+    }
+
+    if (showUserMenu) {
+      setShowUserMenu(false);
+      setUserMenuPos(null);
+      return;
+    }
+
+    const trigger = event.currentTarget;
+    if (!(trigger instanceof HTMLElement)) {
+      setShowUserMenu(true);
+      setUserMenuPos(null);
+      return;
+    }
+
+    const rect = trigger.getBoundingClientRect();
+    const estimatedHeight = 44;
+    const openUp = rect.top - estimatedHeight < 8;
+
+    setUserMenuPos({
+      left: rect.right,
+      top: openUp ? rect.bottom + 6 : rect.top - 6,
+      up: !openUp
+    });
+    setShowUserMenu(true);
+  }
+
+  async function logout() {
+    setShowUserMenu(false);
+    setUserMenuPos(null);
+    await authLogout();
+    clearAuth();
+    syncUrl(null, "replace");
   }
 
   async function renameSession(event, session) {
@@ -984,12 +1042,30 @@ export default function WorkspaceView({ initialSessionId = null }) {
 
         <div className="chat-sidebar-foot">
           {isAuthed && currentUser ? (
-            <p className="muted" title={currentUser.email}>
-              {currentUser.name}
-            </p>
+            <button
+              type="button"
+              className="user-menu-trigger"
+              onClick={toggleUserMenu}
+              aria-label="Account menu"
+              aria-expanded={showUserMenu}
+              title={currentUser.email}
+            >
+              <span>{currentUser.name}</span>
+            </button>
           ) : null}
         </div>
       </aside>
+
+      {showUserMenu && currentUser && userMenuPos ? (
+        <div
+          className={`session-global-menu ${userMenuPos.up ? "up" : ""}`}
+          style={{ left: userMenuPos.left, top: userMenuPos.top }}
+        >
+          <button type="button" className="session-item-menu-btn danger" onClick={logout}>
+            Logout
+          </button>
+        </div>
+      ) : null}
 
       {openMenuSession && sessionMenuPos ? (
         <div
@@ -1031,10 +1107,10 @@ export default function WorkspaceView({ initialSessionId = null }) {
                       ? isFirstSession
                         ? "Click + New Session in the left panel to start your first practice."
                         : "Select any session on the left, or click + New Session to create a new one."
-                      : "Create an account or sign in to unlock private sessions."}
+                      : ""}
                   </p>
 
-                  {!isAuthed ? <AuthForm onAuthed={handleAuthed} /> : null}
+                  {authStatus === "none" ? <AuthForm onAuthed={handleAuthed} /> : null}
                 </div>
               </div>
             ) : !displayedSessionReady ? (

@@ -1,12 +1,15 @@
 import { proxyJson } from "../../_proxy";
 
-export async function GET(request, { params }) {
-  const path = Array.isArray(params?.path) ? params.path.join("/") : "";
-  return proxyJson(request, `/v1/${path}`);
+function upstreamPathFromRequest(request) {
+  const { pathname } = new URL(request.url);
+  const suffix = pathname.replace(/^\/api\/v1\/?/, "");
+  return `/v1/${suffix}`;
 }
 
-export async function POST(request, { params }) {
-  const path = Array.isArray(params?.path) ? params.path.join("/") : "";
-  return proxyJson(request, `/v1/${path}`);
+export async function GET(request) {
+  return proxyJson(request, upstreamPathFromRequest(request));
 }
 
+export async function POST(request) {
+  return proxyJson(request, upstreamPathFromRequest(request));
+}

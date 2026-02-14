@@ -14,14 +14,7 @@ export default function AuthForm({ onAuthed }) {
     password: ""
   });
 
-  const heading = useMemo(() => (mode === "login" ? "Sign in" : "Create your profile"), [mode]);
-  const subheading = useMemo(
-    () =>
-      mode === "login"
-        ? "Welcome back. Keep your sessions private."
-        : "One profile per person. Your sessions stay isolated.",
-    [mode]
-  );
+  const submitLabel = useMemo(() => (mode === "login" ? "Sign in" : "Register"), [mode]);
 
   function onChange(event) {
     const { name, value } = event.target;
@@ -46,7 +39,13 @@ export default function AuthForm({ onAuthed }) {
       const user = await authRegister({ name, email, password });
       onAuthed?.(user);
     } catch (submitError) {
-      setError(submitError.message || "Authentication failed");
+      const message = submitError?.message || "Authentication failed";
+      if (mode === "register" && message === "Email already registered") {
+        setMode("login");
+        setError("Already registered. Login.");
+        return;
+      }
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -54,34 +53,27 @@ export default function AuthForm({ onAuthed }) {
 
   return (
     <div className="auth-panel" role="region" aria-label="Account access">
-      <div className="auth-panel-head">
-        <div>
-          <h2>{heading}</h2>
-          <p className="muted">{subheading}</p>
-        </div>
-
-        <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
-          <button
-            type="button"
-            className={mode === "register" ? "active" : ""}
-            onClick={() => setMode("register")}
-            disabled={busy}
-            role="tab"
-            aria-selected={mode === "register"}
-          >
-            Register
-          </button>
-          <button
-            type="button"
-            className={mode === "login" ? "active" : ""}
-            onClick={() => setMode("login")}
-            disabled={busy}
-            role="tab"
-            aria-selected={mode === "login"}
-          >
-            Login
-          </button>
-        </div>
+      <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
+        <button
+          type="button"
+          className={mode === "register" ? "active" : ""}
+          onClick={() => setMode("register")}
+          disabled={busy}
+          role="tab"
+          aria-selected={mode === "register"}
+        >
+          Register
+        </button>
+        <button
+          type="button"
+          className={mode === "login" ? "active" : ""}
+          onClick={() => setMode("login")}
+          disabled={busy}
+          role="tab"
+          aria-selected={mode === "login"}
+        >
+          Login
+        </button>
       </div>
 
       <form className="auth-form" onSubmit={onSubmit}>
@@ -132,10 +124,9 @@ export default function AuthForm({ onAuthed }) {
 
         <button type="submit" className="auth-submit with-spinner" disabled={busy}>
           {busy ? <LoadingSpinner /> : null}
-          <span>{busy ? "Working..." : mode === "login" ? "Sign in" : "Create account"}</span>
+          <span>{busy ? "Working..." : submitLabel}</span>
         </button>
       </form>
     </div>
   );
 }
-
