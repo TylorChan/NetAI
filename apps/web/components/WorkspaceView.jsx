@@ -416,7 +416,9 @@ export default function WorkspaceView({ initialSessionId = null }) {
   const { status: realtimeStatus, connect, disconnect } = useRealtimeSession({
     sessionId: activeSessionId,
     stageState: resume?.session?.stageState,
-    contextSummary: resume?.contextSummary,
+    goal: resume?.session?.goal,
+    targetProfileContext: resume?.session?.targetProfileContext,
+    customContext: resume?.session?.customContext,
     conversationSummary: resume?.conversationSummary,
     historySeedTurns: resume?.recentTurns,
     onTranscriptEvent: handleTranscriptEvent,
